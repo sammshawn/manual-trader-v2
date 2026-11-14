@@ -2,7 +2,7 @@
 //  MANUAL TRADER — v3.0 (Fixed Prices + Premium Dashboard)
 // ============================================
 
-const CLIENT_ID = "34RaG6zRPpQYEeugvLnPq"; // Your App ID
+const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN"; // Your App ID
 
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const AUTH_URL = "https://auth.deriv.com/oauth2/auth";
