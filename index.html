@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2.0" />
+  <link rel="stylesheet" href="style.css?v=3.0" />
 </head>
 <body>
 
@@ -96,12 +96,30 @@
         <p class="trade-hint" id="tradeHint">Select a barrier (0–9) by clicking a circle, then choose your trade.</p>
       </div>
 
-      <!-- RESULTS PANEL -->
+      <!-- RESULTS DASHBOARD -->
       <div class="results-panel">
+        
+        <!-- DASHBOARD STATS -->
+        <div class="stats-bar">
+          <div class="stat-item">
+            <span class="stat-label">Wins</span>
+            <span class="stat-value win" id="statWins">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Losses</span>
+            <span class="stat-value loss" id="statLosses">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Total P/L</span>
+            <span class="stat-value" id="statPL">$0.00</span>
+          </div>
+        </div>
+
         <div class="results-header">
-          <h2>Trade Results</h2>
+          <h2>Trade History</h2>
           <span class="results-count" id="resultsCount">0</span>
         </div>
+        
         <div class="results-log" id="resultsLog">
           <p class="empty-log">No trades yet. Place your first trade above.</p>
         </div>
@@ -115,6 +133,6 @@
     <p>Manual Trader · Not financial advice · Trade at your own risk</p>
   </footer>
 
-  <script src="script.js?v=2.0"></script>
+  <script src="script.js?v=3.0"></script>
 </body>
 </html>

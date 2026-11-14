@@ -159,7 +159,7 @@ body {
 .digit-circle:hover { border-color: var(--blue); color: var(--text); }
 .digit-circle.selected { border-color: var(--cyan); color: var(--cyan); box-shadow: 0 0 20px -5px var(--blue-glow); }
 
-/* 🚨 CURSOR AT THE TOP */
+/* CURSOR AT THE TOP */
 .digit-circle.active {
   transform: scale(1.15);
   border-color: var(--green);
@@ -171,7 +171,7 @@ body {
 .digit-circle.active::after {
   content: "▼";
   position: absolute;
-  top: -24px; /* Moved to top */
+  top: -24px;
   left: 50%; transform: translateX(-50%);
   font-size: 0.9rem;
   color: var(--green);
@@ -225,23 +225,42 @@ body {
 
 .trade-hint { font-size: 0.8rem; color: var(--muted); text-align: center; }
 
-/* RESULTS PANEL */
+/* RESULTS PANEL & DASHBOARD */
 .results-panel {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 1.5rem;
 }
+
+/* Stats Bar */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(0,0,0,0.3);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+.stat-item { text-align: center; }
+.stat-label { display: block; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.2rem; }
+.stat-value { font-family: 'JetBrains Mono', monospace; font-size: 1.3rem; font-weight: 800; }
+.stat-value.win { color: var(--green); }
+.stat-value.loss { color: var(--red); }
+
 .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .results-header h2 { font-size: 1rem; font-weight: 800; }
 .results-count { background: var(--blue); color: white; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 800; }
 .results-log { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem; }
 .empty-log { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 2rem 0; }
+
 .result-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 1rem;
-  padding: 0.7rem 1rem;
+  padding: 0.8rem 1rem;
   border-radius: 10px;
   border-left: 3px solid var(--border);
   background: var(--surface-2);
@@ -251,8 +270,14 @@ body {
 .result-item.win { border-left-color: var(--green); }
 .result-item.loss { border-left-color: var(--red); }
 .result-time { color: var(--muted); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
-.result-detail { font-weight: 600; }
-.result-pl { font-family: 'JetBrains Mono', monospace; font-weight: 800; text-align: right; }
+
+/* Price Entry/Exit Styling in Log */
+.result-detail { display: flex; flex-direction: column; gap: 0.1rem; }
+.price-entry { color: var(--cyan); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
+.price-exit { color: var(--amber); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
+.result-message { font-weight: 700; font-size: 0.8rem; margin-top: 0.1rem; }
+
+.result-pl { font-family: 'JetBrains Mono', monospace; font-weight: 800; text-align: right; font-size: 1rem; }
 .result-pl.positive { color: var(--green); }
 .result-pl.negative { color: var(--red); }
 

@@ -1,9 +1,8 @@
 // ============================================
-//  MANUAL TRADER — v2.0 (Smooth Switching + Demo/Real Toggle)
+//  MANUAL TRADER — v3.0 (Fixed Prices + Premium Dashboard)
 // ============================================
 
-// ⚠️ REPLACE THIS WITH YOUR ACTUAL DERIV APP ID ⚠️
-const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN"; 
+const CLIENT_ID = "34RaG6zRPpQYEeugvLnPq"; // Your App ID
 
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const AUTH_URL = "https://auth.deriv.com/oauth2/auth";
@@ -24,7 +23,11 @@ let selectedBarrier = 5;
 let tradeLock = false;
 let pendingTrade = null;
 
-// DOM
+// Stats
+let totalWins = 0;
+let totalLosses = 0;
+let totalPL = 0;
+
 const $ = (id) => document.getElementById(id);
 const loginScreen = $("loginScreen");
 const tradingScreen = $("tradingScreen");
@@ -45,6 +48,11 @@ const tradeBtns = document.querySelectorAll(".btn-trade");
 const accountSwitcher = $("accountSwitcher");
 const pillDemo = $("pillDemo");
 const pillReal = $("pillReal");
+
+// Stats Elements
+const statWinsEl = $("statWins");
+const statLossesEl = $("statLosses");
+const statPLEl = $("statPL");
 
 const DECIMALS_MAP = {
   R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2,
@@ -76,8 +84,18 @@ function updateHint() {
   tradeHint.textContent = `Barrier selected: ${selectedBarrier}. Choose a trade type above.`;
 }
 
-// ---- LOGGING ----
-function addResult(type, message, profit) {
+// ---- DASHBOARD STATS UPDATE ----
+function updateDashboardStats() {
+  if (statWinsEl) statWinsEl.textContent = totalWins;
+  if (statLossesEl) statLossesEl.textContent = totalLosses;
+  if (statPLEl) {
+    statPLEl.textContent = totalPL >= 0 ? `+$${totalPL.toFixed(2)}` : `-$${Math.abs(totalPL).toFixed(2)}`;
+    statPLEl.style.color = totalPL >= 0 ? "var(--green)" : "var(--red)";
+  }
+}
+
+// ---- PREMIUM LOGGING ----
+function addResult(type, message, profit, entryPrice, exitPrice) {
   resultCount++;
   resultsCount.textContent = resultCount;
 
@@ -90,12 +108,25 @@ function addResult(type, message, profit) {
   const plText = profit >= 0 ? `+$${profit.toFixed(2)}` : `-$${Math.abs(profit).toFixed(2)}`;
   const plClass = profit >= 0 ? "positive" : "negative";
 
+  const entryStr = entryPrice || "—";
+  const exitStr = exitPrice || "—";
+
   el.innerHTML = `
     <span class="result-time">${time}</span>
-    <span class="result-detail">${message}</span>
+    <span class="result-detail">
+      <span class="price-entry">In: ${entryStr}</span>
+      <span class="price-exit">Out: ${exitStr}</span>
+      <span class="result-message">${message}</span>
+    </span>
     <span class="result-pl ${plClass}">${plText}</span>
   `;
   resultsLog.prepend(el);
+
+  // Update totals
+  if (profit > 0) totalWins++;
+  else if (profit < 0) totalLosses++;
+  totalPL += profit;
+  updateDashboardStats();
 }
 
 // ---- OAUTH PKCE ----
@@ -174,12 +205,10 @@ async function fetchAccounts() {
     const demo = accounts.find((a) => (a.type || a.account_type) === "demo");
     const real = accounts.find((a) => (a.type || a.account_type) === "real");
 
-    // Set up toggle
     accountSwitcher.style.display = "flex";
     pillDemo.onclick = () => demo && selectAccount(demo);
     pillReal.onclick = () => real && selectAccount(real);
 
-    // Default to Demo
     if (demo) selectAccount(demo);
     else if (real) selectAccount(real);
     return true;
@@ -188,28 +217,18 @@ async function fetchAccounts() {
   }
 }
 
-// ---- SELECT ACCOUNT ----
 async function selectAccount(acc) {
   if (tradeLock) return;
-  
-  activeAccount = {
-    id: acc.account_id,
-    type: acc.type || acc.account_type,
-    currency: acc.currency || "USD",
-  };
-
-  // Update toggle UI
+  activeAccount = { id: acc.account_id, type: acc.type || acc.account_type, currency: acc.currency || "USD" };
   pillDemo.classList.toggle("active", activeAccount.type === "demo");
   pillReal.classList.toggle("active", activeAccount.type === "real");
-  
   accId.textContent = activeAccount.id;
   accountInfo.style.display = "flex";
-  
   if (ws) ws.close();
   await connectWS();
 }
 
-// ---- WEBSOCKET (OTP) ----
+// ---- WEBSOCKET ----
 async function connectWS() {
   try {
     const res = await fetch(`${API_BASE}/accounts/${activeAccount.id}/otp`, {
@@ -228,6 +247,7 @@ async function connectWS() {
       tradingScreen.style.display = "block";
       buildCircles();
       updateHint();
+      updateDashboardStats();
     };
 
     ws.onmessage = (event) => {
@@ -245,39 +265,22 @@ async function connectWS() {
       if (msg.msg_type === "balance" && msg.balance) {
         balanceEl.textContent = `$${parseFloat(msg.balance.balance).toFixed(2)}`;
       }
-
-      if (msg.msg_type === "tick" && msg.tick) {
-        handleTick(msg.tick);
-      }
-
-      if (msg.msg_type === "proposal" && msg.proposal) {
-        handleProposal(msg.proposal);
-      }
-
-      if (msg.msg_type === "buy" && msg.buy) {
-        handleBuy(msg.buy);
-      }
-
-      if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) {
-        handleContractUpdate(msg.proposal_open_contract);
-      }
+      if (msg.msg_type === "tick" && msg.tick) handleTick(msg.tick);
+      if (msg.msg_type === "proposal" && msg.proposal) handleProposal(msg.proposal);
+      if (msg.msg_type === "buy" && msg.buy) handleBuy(msg.buy);
+      if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) handleContractUpdate(msg.proposal_open_contract);
     };
 
-    ws.onclose = () => {
-      console.log("WS closed");
-    };
+    ws.onclose = () => console.log("WS closed");
 
   } catch (err) {
     console.warn("Connection failed:", err);
   }
 }
 
-// 🚨 SMOOTH MARKET SWITCHING
 function subscribeTicks() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  // 1. Forget all previous subscriptions
   ws.send(JSON.stringify({ forget_all: "ticks", req_id: reqId++ }));
-  // 2. Subscribe to the new one after a short delay to prevent overlap
   setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ }));
@@ -285,67 +288,43 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER ----
+// ---- TICK ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
-
   const decimals = DECIMALS_MAP[currentMarket] || 2;
   const priceStr = parseFloat(tick.quote).toFixed(decimals);
   lastPrice = priceStr;
   lastDigit = parseInt(priceStr.slice(-1), 10);
-
   lastPriceEl.textContent = priceStr;
-
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
 }
 
-// ---- TRADE BUTTONS ----
+// ---- TRADE ----
 tradeBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     if (tradeLock || !ws || ws.readyState !== WebSocket.OPEN) return;
     const type = btn.dataset.type;
     const stake = parseFloat(stakeInput.value);
-    if (!(stake >= 0.35)) {
-      alert("Minimum stake is $0.35");
-      return;
-    }
+    if (!(stake >= 0.35)) { alert("Minimum stake is $0.35"); return; }
 
-    let contractType;
-    let barrier = null;
-
-    if (type === "over") {
-      contractType = "DIGITOVER";
-      barrier = selectedBarrier;
-      if (barrier === 9) { alert("Over 9 can never win."); return; }
-    } else if (type === "under") {
-      contractType = "DIGITUNDER";
-      barrier = selectedBarrier;
-      if (barrier === 0) { alert("Under 0 can never win."); return; }
-    } else if (type === "even") {
-      contractType = "DIGITEVEN";
-    } else if (type === "odd") {
-      contractType = "DIGITODD";
-    }
+    let contractType, barrier = null;
+    if (type === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; if (barrier === 9) { alert("Over 9 can never win."); return; } }
+    else if (type === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; if (barrier === 0) { alert("Under 0 can never win."); return; } }
+    else if (type === "even") { contractType = "DIGITEVEN"; }
+    else if (type === "odd") { contractType = "DIGITODD"; }
 
     tradeLock = true;
     enableTradeButtons(false);
     pendingTrade = { type, stake, contractType, barrier };
 
     const req = {
-      proposal: 1,
-      amount: stake.toFixed(2),
-      basis: "stake",
-      contract_type: contractType,
-      currency: activeAccount.currency,
-      duration: 1,
-      duration_unit: "t", // 🚨 1 tick contract
-      underlying_symbol: currentMarket,
-      req_id: reqId++,
+      proposal: 1, amount: stake.toFixed(2), basis: "stake", contract_type: contractType,
+      currency: activeAccount.currency, duration: 1, duration_unit: "t",
+      underlying_symbol: currentMarket, req_id: reqId++,
     };
     if (barrier !== null) req.barrier = String(barrier);
-
     ws.send(JSON.stringify(req));
     tradeHint.textContent = "Requesting proposal…";
   });
@@ -355,7 +334,6 @@ function enableTradeButtons(enabled) {
   tradeBtns.forEach((btn) => (btn.disabled = !enabled));
 }
 
-// ---- PROPOSAL → BUY ----
 function handleProposal(proposal) {
   if (!pendingTrade) return;
   ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, req_id: reqId++ }));
@@ -363,35 +341,31 @@ function handleProposal(proposal) {
 
 function handleBuy(buy) {
   if (!pendingTrade) return;
-  const trade = pendingTrade;
   pendingTrade = null;
-
-  addResult("info", `Bought ${trade.contractType} at $${trade.stake.toFixed(2)}`, 0);
   tradeHint.textContent = "Waiting for result…";
-
-  ws.send(JSON.stringify({
-    proposal_open_contract: 1,
-    contract_id: buy.contract_id,
-    subscribe: 1,
-    req_id: reqId++,
-  }));
+  ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: buy.contract_id, subscribe: 1, req_id: reqId++ }));
 }
 
-// ---- CONTRACT RESULT ----
+// ---- CONTRACT UPDATE (Fixed Prices) ----
 function handleContractUpdate(contract) {
   if (!contract.is_sold) return;
 
   const profit = parseFloat(contract.profit) || 0;
-  const entryDigit = contract.entry_tick ? parseInt(String(contract.entry_tick).slice(-1), 10) : "?";
-  const exitDigit = contract.exit_tick ? parseInt(String(contract.exit_tick).slice(-1), 10) : "?";
+  const decimals = DECIMALS_MAP[currentMarket] || 2;
+
+  // Deriv New API: use entry_spot and exit_spot
+  const entrySpot = contract.entry_spot ? parseFloat(contract.entry_spot).toFixed(decimals) : null;
+  const exitSpot = contract.exit_spot ? parseFloat(contract.exit_spot).toFixed(decimals) : null;
+
+  const entryDigit = entrySpot ? entrySpot.slice(-1) : "?";
+  const exitDigit = exitSpot ? exitSpot.slice(-1) : "?";
 
   const type = profit > 0 ? "win" : "loss";
-  const message = `Entry: ${entryDigit} · Exit: ${exitDigit} · ${profit > 0 ? "WIN" : "LOSS"}`;
+  const message = `${profit > 0 ? "WIN" : "LOSS"} · In: ${entryDigit} · Out: ${exitDigit}`;
 
-  addResult(type, message, profit);
+  addResult(type, message, profit, entrySpot, exitSpot);
 
   ws.send(JSON.stringify({ forget: contract.id, req_id: reqId++ }));
-
   tradeLock = false;
   enableTradeButtons(true);
   tradeHint.textContent = `Last trade: ${profit > 0 ? "✅ Won" : "❌ Lost"} · Select a barrier and trade again.`;
@@ -411,6 +385,8 @@ logoutBtn.addEventListener("click", () => {
   resultsLog.innerHTML = '<p class="empty-log">No trades yet. Place your first trade above.</p>';
   resultCount = 0;
   resultsCount.textContent = "0";
+  totalWins = 0; totalLosses = 0; totalPL = 0;
+  updateDashboardStats();
 });
 
 // ---- MARKET SWITCH ----
@@ -424,7 +400,6 @@ marketSelect.addEventListener("change", () => {
 async function init() {
   loginBtn.addEventListener("click", startLogin);
   loginBtnLarge.addEventListener("click", startLogin);
-
   const success = await handleCallback();
   if (success) {
     const ok = await fetchAccounts();
@@ -438,5 +413,4 @@ async function init() {
     }
   }
 }
-
 init();
