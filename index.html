@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual Trader — Deriv</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark">🎯</span>
+        Manual Trader
+      </div>
+      <div class="auth-area" id="authArea">
+        <button class="btn-login" id="loginBtn">Login with Deriv</button>
+        <div class="account-info" id="accountInfo" style="display:none;">
+          <span class="acc-type" id="accType">—</span>
+          <span class="acc-id" id="accId">—</span>
+          <span class="balance" id="balance">$0.00</span>
+          <button class="btn-logout" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- LOGIN SCREEN -->
+    <section class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <div class="login-icon">🔐</div>
+        <h1>Connect to Deriv</h1>
+        <p>Log in to place manual digit trades on your Demo or Real account.</p>
+        <button class="btn-login-large" id="loginBtnLarge">Login with Deriv</button>
+      </div>
+    </section>
+
+    <!-- TRADING SCREEN -->
+    <section class="trading-screen" id="tradingScreen" style="display:none;">
+
+      <!-- MARKET SELECTOR -->
+      <div class="control-bar">
+        <label class="market-select">
+          <span>Market</span>
+          <select id="marketSelect">
+            <option value="R_10">Volatility 10</option>
+            <option value="R_25">Volatility 25</option>
+            <option value="R_50">Volatility 50</option>
+            <option value="R_75">Volatility 75</option>
+            <option value="R_100" selected>Volatility 100</option>
+            <option value="1HZ10V">Volatility 10 (1s)</option>
+            <option value="1HZ25V">Volatility 25 (1s)</option>
+            <option value="1HZ50V">Volatility 50 (1s)</option>
+            <option value="1HZ75V">Volatility 75 (1s)</option>
+            <option value="1HZ100V">Volatility 100 (1s)</option>
+          </select>
+        </label>
+        <div class="last-price-display">
+          <span class="last-price-label">Last Price</span>
+          <span class="last-price" id="lastPrice">—</span>
+        </div>
+      </div>
+
+      <!-- DIGIT CIRCLES -->
+      <div class="digit-circles-wrap">
+        <div class="digit-circles" id="digitCircles">
+          <!-- Injected by JS -->
+        </div>
+      </div>
+
+      <!-- TRADE PANEL -->
+      <div class="trade-panel">
+        <div class="stake-row">
+          <label>Stake (USD)</label>
+          <input type="number" id="stakeInput" value="0.35" min="0.35" step="0.01" />
+        </div>
+        <div class="trade-buttons">
+          <button class="btn-trade over" data-type="over">OVER</button>
+          <button class="btn-trade under" data-type="under">UNDER</button>
+          <button class="btn-trade even" data-type="even">EVEN</button>
+          <button class="btn-trade odd" data-type="odd">ODD</button>
+        </div>
+        <p class="trade-hint" id="tradeHint">Select a barrier (0–9) by clicking a circle, then choose your trade.</p>
+      </div>
+
+      <!-- RESULTS PANEL -->
+      <div class="results-panel">
+        <div class="results-header">
+          <h2>Trade Results</h2>
+          <span class="results-count" id="resultsCount">0</span>
+        </div>
+        <div class="results-log" id="resultsLog">
+          <p class="empty-log">No trades yet. Place your first trade above.</p>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>Manual Trader · Not financial advice · Trade at your own risk</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
