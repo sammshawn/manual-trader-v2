@@ -1,5 +1,5 @@
 // ============================================
-//  MANUAL TRADER — D-Circles + OAuth
+//  MANUAL TRADER — v2.0 (Smooth Switching + Demo/Real Toggle)
 // ============================================
 
 // ⚠️ REPLACE THIS WITH YOUR ACTUAL DERIV APP ID ⚠️
@@ -21,7 +21,6 @@ let currentDecimals = 2;
 let lastPrice = null;
 let lastDigit = null;
 let selectedBarrier = 5;
-
 let tradeLock = false;
 let pendingTrade = null;
 
@@ -33,7 +32,6 @@ const loginBtn = $("loginBtn");
 const loginBtnLarge = $("loginBtnLarge");
 const logoutBtn = $("logoutBtn");
 const accountInfo = $("accountInfo");
-const accType = $("accType");
 const accId = $("accId");
 const balanceEl = $("balance");
 const marketSelect = $("marketSelect");
@@ -44,6 +42,9 @@ const resultsLog = $("resultsLog");
 const resultsCount = $("resultsCount");
 const tradeHint = $("tradeHint");
 const tradeBtns = document.querySelectorAll(".btn-trade");
+const accountSwitcher = $("accountSwitcher");
+const pillDemo = $("pillDemo");
+const pillReal = $("pillReal");
 
 const DECIMALS_MAP = {
   R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2,
@@ -114,12 +115,6 @@ async function generateCodeChallenge(verifier) {
 }
 
 async function startLogin() {
-  // 🚨 Safety check for missing CLIENT_ID
-  if (CLIENT_ID === "YOUR_APP_ID_HERE" || !CLIENT_ID) {
-    alert("Error: You need to replace 'YOUR_APP_ID_HERE' in script.js with your real Deriv App ID!");
-    return;
-  }
-
   const { codeVerifier, state } = generatePKCE();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const params = new URLSearchParams({
@@ -156,10 +151,7 @@ async function handleCallback() {
       }),
     });
     const data = await response.json();
-    if (!response.ok) {
-      console.error("Token error:", data);
-      return false;
-    }
+    if (!response.ok) return false;
     accessToken = data.access_token;
     sessionStorage.setItem("deriv_access_token", accessToken);
     sessionStorage.removeItem("pkce_code_verifier");
@@ -167,7 +159,6 @@ async function handleCallback() {
     window.history.replaceState({}, document.title, window.location.pathname);
     return true;
   } catch (err) {
-    console.error("Network error:", err);
     return false;
   }
 }
@@ -177,31 +168,44 @@ async function fetchAccounts() {
   try {
     const res = await fetch(`${API_BASE}/accounts`, { headers: { Authorization: `Bearer ${accessToken}` } });
     const data = await res.json();
-    if (!res.ok) {
-      if (res.status === 401) sessionStorage.removeItem("deriv_access_token");
-      return false;
-    }
+    if (!res.ok) return false;
     accounts = data.data || [];
+    
     const demo = accounts.find((a) => (a.type || a.account_type) === "demo");
     const real = accounts.find((a) => (a.type || a.account_type) === "real");
+
+    // Set up toggle
+    accountSwitcher.style.display = "flex";
+    pillDemo.onclick = () => demo && selectAccount(demo);
+    pillReal.onclick = () => real && selectAccount(real);
+
+    // Default to Demo
     if (demo) selectAccount(demo);
     else if (real) selectAccount(real);
-    else return false;
     return true;
   } catch (err) {
     return false;
   }
 }
 
+// ---- SELECT ACCOUNT ----
 async function selectAccount(acc) {
+  if (tradeLock) return;
+  
   activeAccount = {
     id: acc.account_id,
     type: acc.type || acc.account_type,
     currency: acc.currency || "USD",
   };
-  accType.textContent = activeAccount.type.toUpperCase();
+
+  // Update toggle UI
+  pillDemo.classList.toggle("active", activeAccount.type === "demo");
+  pillReal.classList.toggle("active", activeAccount.type === "real");
+  
   accId.textContent = activeAccount.id;
   accountInfo.style.display = "flex";
+  
+  if (ws) ws.close();
   await connectWS();
 }
 
@@ -233,6 +237,7 @@ async function connectWS() {
         if (msg.echo_req && (msg.echo_req.buy || msg.echo_req.proposal)) {
           tradeLock = false;
           enableTradeButtons(true);
+          tradeHint.textContent = "API Error: " + msg.error.message;
         }
         return;
       }
@@ -267,10 +272,17 @@ async function connectWS() {
   }
 }
 
+// 🚨 SMOOTH MARKET SWITCHING
 function subscribeTicks() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // 1. Forget all previous subscriptions
   ws.send(JSON.stringify({ forget_all: "ticks", req_id: reqId++ }));
-  ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ }));
+  // 2. Subscribe to the new one after a short delay to prevent overlap
+  setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ }));
+    }
+  }, 100);
 }
 
 // ---- TICK HANDLER ----
@@ -306,11 +318,11 @@ tradeBtns.forEach((btn) => {
     if (type === "over") {
       contractType = "DIGITOVER";
       barrier = selectedBarrier;
-      if (barrier === 9) { alert("Over 9 can never win. Pick a lower barrier."); return; }
+      if (barrier === 9) { alert("Over 9 can never win."); return; }
     } else if (type === "under") {
       contractType = "DIGITUNDER";
       barrier = selectedBarrier;
-      if (barrier === 0) { alert("Under 0 can never win. Pick a higher barrier."); return; }
+      if (barrier === 0) { alert("Under 0 can never win."); return; }
     } else if (type === "even") {
       contractType = "DIGITEVEN";
     } else if (type === "odd") {
@@ -328,7 +340,7 @@ tradeBtns.forEach((btn) => {
       contract_type: contractType,
       currency: activeAccount.currency,
       duration: 1,
-      duration_unit: "t",
+      duration_unit: "t", // 🚨 1 tick contract
       underlying_symbol: currentMarket,
       req_id: reqId++,
     };
@@ -394,6 +406,7 @@ logoutBtn.addEventListener("click", () => {
   loginScreen.style.display = "flex";
   tradingScreen.style.display = "none";
   accountInfo.style.display = "none";
+  accountSwitcher.style.display = "none";
   loginBtn.style.display = "block";
   resultsLog.innerHTML = '<p class="empty-log">No trades yet. Place your first trade above.</p>';
   resultCount = 0;
@@ -415,17 +428,13 @@ async function init() {
   const success = await handleCallback();
   if (success) {
     const ok = await fetchAccounts();
-    if (ok) {
-      loginBtn.style.display = "none";
-    }
+    if (ok) loginBtn.style.display = "none";
   } else {
     const stored = sessionStorage.getItem("deriv_access_token");
     if (stored) {
       accessToken = stored;
       const ok = await fetchAccounts();
-      if (ok) {
-        loginBtn.style.display = "none";
-      }
+      if (ok) loginBtn.style.display = "none";
     }
   }
 }

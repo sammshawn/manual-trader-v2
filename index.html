@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2.0" />
 </head>
 <body>
 
@@ -18,10 +18,16 @@
         <span class="brand-mark">🎯</span>
         Manual Trader
       </div>
+      
+      <!-- ACCOUNT SWITCHER (Demo / Real) -->
+      <div class="account-switcher" id="accountSwitcher" style="display:none;">
+        <div class="acc-pill demo active" id="pillDemo">🇺🇸 Demo</div>
+        <div class="acc-pill real" id="pillReal">🇺🇸 Real</div>
+      </div>
+
       <div class="auth-area" id="authArea">
         <button class="btn-login" id="loginBtn">Login with Deriv</button>
         <div class="account-info" id="accountInfo" style="display:none;">
-          <span class="acc-type" id="accType">—</span>
           <span class="acc-id" id="accId">—</span>
           <span class="balance" id="balance">$0.00</span>
           <button class="btn-logout" id="logoutBtn">Logout</button>
@@ -109,6 +115,6 @@
     <p>Manual Trader · Not financial advice · Trade at your own risk</p>
   </footer>
 
-  <script src="script.js"></script>
+  <script src="script.js?v=2.0"></script>
 </body>
 </html>
