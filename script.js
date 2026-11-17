@@ -1,7 +1,6 @@
 // ============================================
-//  AUTO TRADER PRO — v11.0 (Dynamic Dominance Barrier)
-//  The barrier is calculated from the Top 2 dominant digits.
-//  No Max Steps. TP/SL only.
+//  AUTO TRADER PRO — v12.0 (Smart Wave Dominance)
+//  Research-based: 100-tick bias, Starvation barriers, Streak Exhaustion entry
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -24,7 +23,8 @@ let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
 let currentContractId = null;
-let tickHistory = []; 
+let tickHistory = []; // Now stores up to 100 ticks for bias
+let recentStreak = []; // Tracks the last 5 digits for exhaustion
 
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
@@ -276,7 +276,7 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER & DYNAMIC WAVE ----
+// ---- TICK HANDLER & SMART WAVE ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
@@ -284,99 +284,122 @@ function handleTick(tick) {
   lastDigit = parseInt(priceStr.slice(-1), 10);
   lastPriceEl.textContent = priceStr;
   
+  // Track 100 ticks for Bias
   tickHistory.push(lastDigit);
-  if (tickHistory.length > 20) tickHistory.shift();
+  if (tickHistory.length > 100) tickHistory.shift();
+
+  // Track last 5 for Exhaustion
+  recentStreak.push(lastDigit);
+  if (recentStreak.length > 5) recentStreak.shift();
 
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
 
-  // 🚨 LIVE WAVE CHECK & EXECUTION
+  // 🚨 SMART WAVE CHECK
   if (autoModeSelect.value === "wave") {
-    const wave = calculateDynamicWave();
+    const wave = calculateSmartWave();
     if (wave) {
       waveHighCount.textContent = wave.highCount;
       waveLowCount.textContent = wave.lowCount;
       wavePct.textContent = `${wave.strength.toFixed(0)}%`;
       
-      if (wave.type === "over") {
-        waveSignal.textContent = `OVER ${wave.barrier} SIGNAL 🟢`;
+      if (wave.status === "ready") {
+        waveSignal.textContent = `${wave.type.toUpperCase()} ${wave.barrier} READY 🟢`;
         waveSignal.style.color = "var(--green)";
-      } else if (wave.type === "under") {
-        waveSignal.textContent = `UNDER ${wave.barrier} SIGNAL 🔴`;
-        waveSignal.style.color = "var(--red)";
-      } else {
-        waveSignal.textContent = "Waiting for 60% dominance...";
+        
+        if (isAutoTrading && currentState === STATE.IDLE) {
+          requestTrade(wave.type, wave.barrier);
+        }
+      } else if (wave.status === "waiting_exhaustion") {
+        waveSignal.textContent = `Waiting for ${wave.exhaustSide.toUpperCase()} streak to break...`;
         waveSignal.style.color = "var(--amber)";
-      }
-
-      // 🚨 EXECUTE TRADE IF AUTO IS ON AND SIGNAL EXISTS
-      if (isAutoTrading && wave.type && currentState === STATE.IDLE) {
-        requestTrade(wave.type, wave.barrier); 
+      } else {
+        waveSignal.textContent = "Analyzing 100-tick bias...";
+        waveSignal.style.color = "var(--muted)";
       }
     }
   }
 }
 
-// 🚨 THE SMART WAVE CALCULATOR
-function calculateDynamicWave() {
-  if (tickHistory.length < 5) return null;
-  
-  let highCount = 0, lowCount = 0;
+// 🚨 SMART WAVE CALCULATOR (Research-Based)
+function calculateSmartWave() {
+  if (tickHistory.length < 50) return null; // Need a solid sample
+
+  // 1. Calculate 100-tick Digit Frequencies
   const freq = {};
   for (let i = 0; i < 10; i++) freq[i] = 0;
-  
-  tickHistory.forEach(d => {
-    freq[d]++;
-    if (d >= 5) highCount++;
-    else lowCount++;
-  });
+  tickHistory.forEach(d => freq[d]++);
 
-  const total = tickHistory.length;
-  const highPct = (highCount / total) * 100;
-  const lowPct = (lowCount / total) * 100;
-
-  // Get Top 2 Dominant Digits
+  // 2. Find Overfed and Starving digits
   const sorted = Object.keys(freq)
     .map(d => ({ digit: parseInt(d), count: freq[d] }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => a.count - b.count); // Ascending: lowest first
+
+  const starvingLow = sorted.slice(0, 2); // Most suppressed
+  const overfedHigh = sorted.slice(-2); // Most over-appearing
+
+  let highCount = 0, lowCount = 0;
+  tickHistory.forEach(d => { if (d >= 5) highCount++; else lowCount++; });
+  const total = tickHistory.length;
+
+  // 3. Determine Bias
+  // If starving digits are LOW (0-4), bias is UNDER.
+  // If starving digits are HIGH (5-9), bias is OVER.
+  const starvingAvg = (starvingLow[0].digit + starvingLow[1].digit) / 2;
   
-  const top1 = sorted[0].digit;
-  const top2 = sorted[1] ? sorted[1].digit : top1;
+  let biasType = null;
+  let biasBarrier = null;
+  let strength = 0;
 
-  let type = null, barrier = null, strength = 0;
-
-  // 🚨 DYNAMIC BARRIER LOGIC
-  if (highPct >= 60) {
-    type = "over";
-    strength = highPct;
-    // If dominant digits are extremely high (8,9), set barrier tighter (Over 7)
-    // If dominant digits are mid-high (5,6,7), set barrier around Over 4/5
-    const avgTop = (top1 + top2) / 2;
-    if (avgTop >= 8) barrier = 7;
-    else if (avgTop >= 7) barrier = 6;
-    else if (avgTop >= 6) barrier = 5;
-    else barrier = 4; // Default safe high barrier
-    
-    // Guard: Ensure barrier is valid (1-8 for Over)
-    barrier = Math.max(1, Math.min(8, barrier));
-
-  } else if (lowPct >= 60) {
-    type = "under";
-    strength = lowPct;
-    // If dominant digits are extremely low (0,1), set barrier tighter (Under 2)
-    // If dominant digits are mid-low (2,3,4), set barrier around Under 5/6
-    const avgTop = (top1 + top2) / 2;
-    if (avgTop <= 1) barrier = 2;
-    else if (avgTop <= 2) barrier = 3;
-    else if (avgTop <= 3) barrier = 4;
-    else barrier = 5; // Default safe low barrier
-    
-    // Guard: Ensure barrier is valid (1-8 for Under)
-    barrier = Math.max(1, Math.min(8, barrier));
+  if (starvingAvg <= 3.5) {
+    // Low side is starving -> prepare UNDER
+    biasType = "under";
+    // Set barrier to cover the low zone safely (Under 5 captures 0-4)
+    biasBarrier = 5;
+    strength = (lowCount / total) * 100;
+  } else if (starvingAvg >= 5.5) {
+    // High side is starving -> prepare OVER
+    biasType = "over";
+    // Set barrier to cover the high zone safely (Over 4 captures 5-9)
+    biasBarrier = 4;
+    strength = (highCount / total) * 100;
+  } else {
+    return { status: "neutral", highCount, lowCount, strength: 0 };
   }
 
-  return { type, barrier, strength, highCount, lowCount };
+  // 4. Check Exhaustion (The Timing Trigger)
+  // We need the OPPOSITE side to have a streak, then break.
+  // If bias is UNDER, we need a HIGH streak (>=5) to break.
+  const oppositeSide = biasType === "under" ? "high" : "low";
+  const checkOpposite = (d) => biasType === "under" ? d >= 5 : d <= 4;
+
+  // Count how many of the last few ticks were opposite
+  const oppositeStreak = recentStreak.filter(d => checkOpposite(d)).length;
+
+  // Trigger: We need at least 2 consecutive opposite digits, AND the current (last) digit is NOT opposite.
+  const currentIsOpposite = checkOpposite(lastDigit);
+  const lastWasOpposite = recentStreak.length >= 2 && checkOpposite(recentStreak[recentStreak.length - 2]);
+
+  if (oppositeStreak >= 2 && !currentIsOpposite && lastWasOpposite) {
+    // Streak broke! Fire.
+    return { 
+      status: "ready", 
+      type: biasType, 
+      barrier: biasBarrier, 
+      highCount, 
+      lowCount, 
+      strength 
+    };
+  } else {
+    return { 
+      status: "waiting_exhaustion", 
+      exhaustSide: oppositeSide, 
+      highCount, 
+      lowCount, 
+      strength 
+    };
+  }
 }
 
 // ---- TRADING FLOW ----
@@ -471,7 +494,7 @@ function handleContractUpdate(contract) {
   currentState = STATE.IDLE;
   currentContractId = null;
 
-  // Martingale: Only reset on win, keep multiplying on loss (No Max Steps)
+  // Martingale: Reset on win, multiply on loss (No Max Steps)
   if (profit > 0) {
     currentMartingaleStep = 1;
   } else {
@@ -489,7 +512,7 @@ function handleContractUpdate(contract) {
   }
 
   if (isAutoTrading) {
-    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Scanning for next signal...`;
+    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Waiting for exhaustion setup...`;
   } else {
     enableTradeButtons(true);
     tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
@@ -518,7 +541,7 @@ startAutoBtn.addEventListener("click", () => {
   baseStake = parseFloat(stakeInput.value);
   
   if (autoModeSelect.value === "wave") {
-    tradeHint.textContent = `🤖 Wave Dominance Active. Auto-calculating barriers...`;
+    tradeHint.textContent = `🤖 Smart Wave Active. Waiting for 100-tick bias + exhaustion...`;
     waveBanner.classList.add("show");
   } else {
     tradeHint.textContent = `🤖 Auto Active (${autoModeSelect.value})...`;
@@ -554,6 +577,7 @@ marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
   tickHistory = [];
+  recentStreak = [];
   subscribeTicks();
 });
 
