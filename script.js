@@ -1,6 +1,6 @@
 // ============================================
-//  AUTO TRADER PRO — v7.0 (Dominance Tracker)
-//  Dynamic Cursor now uses 20-tick statistical dominance
+//  AUTO TRADER PRO — v8.0 (Wave Dominance)
+//  Added: Wave Dominance Mode (Auto-detects Over/Under)
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -24,7 +24,7 @@ let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
 let currentContractId = null;
-let tickHistory = []; // 🚨 Stores the last 20 digits
+let tickHistory = []; // Stores last 20 digits
 
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
@@ -268,7 +268,7 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER & DOMINANCE TRACKER ----
+// ---- TICK HANDLER ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
@@ -276,7 +276,6 @@ function handleTick(tick) {
   lastDigit = parseInt(priceStr.slice(-1), 10);
   lastPriceEl.textContent = priceStr;
   
-  // 🚨 Update tick history for Dominance Tracker
   tickHistory.push(lastDigit);
   if (tickHistory.length > 20) tickHistory.shift();
 
@@ -285,23 +284,27 @@ function handleTick(tick) {
   if (activeCircle) activeCircle.classList.add("active");
 }
 
-// 🚨 THE DOMINANCE CALCULATOR
-function calculateDominance() {
-  if (tickHistory.length < 10) return null; // Need at least 10 ticks
+// 🚨 WAVE DOMINANCE CALCULATOR
+function calculateWaveDominance() {
+  if (tickHistory.length < 10) return null;
   
-  // 1. Count frequencies
-  const freq = {};
-  for (let i = 0; i < 10; i++) freq[i] = 0;
-  tickHistory.forEach(d => freq[d]++);
+  let highCount = 0; // 5,6,7,8,9
+  let lowCount = 0;  // 0,1,2,3,4
 
-  // 2. Sort by frequency
-  const sorted = Object.keys(freq).map(d => ({ digit: parseInt(d), count: freq[d] }));
-  sorted.sort((a, b) => b.count - a.count);
+  tickHistory.forEach(d => {
+    if (d >= 5) highCount++;
+    else lowCount++;
+  });
+
+  const total = tickHistory.length;
+  const highPct = (highCount / total) * 100;
+  const lowPct = (lowCount / total) * 100;
+
+  // Need 60% dominance to trigger a signal
+  if (highPct >= 60) return { type: "over", barrier: 4, strength: highPct };
+  if (lowPct >= 60) return { type: "under", barrier: 5, strength: lowPct };
   
-  const top1 = sorted[0].digit;
-  const bottom1 = sorted[sorted.length - 1].digit;
-
-  return { top1, bottom1, sorted };
+  return null; // No clear wave
 }
 
 // ---- TRADING FLOW ----
@@ -319,41 +322,54 @@ function requestTrade(signalType) {
   
   let contractType, barrier = null;
 
-  // 🚨 APPLY DOMINANCE LOGIC IF DYNAMIC
-  if (autoModeSelect.value === "dynamic" && isAutoTrading) {
-    const dominance = calculateDominance();
-    if (!dominance) {
-      tradeHint.textContent = "Collecting ticks for dominance...";
+  // 🚨 WAVE DOMINANCE LOGIC
+  if (autoModeSelect.value === "wave" && isAutoTrading) {
+    const wave = calculateWaveDominance();
+    if (!wave) {
+      tradeHint.textContent = "Scanning wave... No clear dominance yet.";
       currentState = STATE.IDLE;
-      return; // Wait for more ticks
+      return; 
     }
     
-    if (signalType === "even" || signalType === "odd") {
-      // Dynamic Even/Odd: Check if top dominant digit is Even or Odd
-      const isTopEven = (dominance.top1 % 2 === 0);
-      contractType = isTopEven ? "DIGITEVEN" : "DIGITODD";
-      tradeHint.textContent = `Dominance says ${isTopEven ? "EVEN" : "ODD"} is strong.`;
-    } 
-    else if (signalType === "over") {
-      // Dynamic Over: Use the top dominant digit as a safe baseline
-      contractType = "DIGITOVER";
-      // Guard: Keep barrier between 1 and 8 to ensure valid trade
-      barrier = Math.max(1, Math.min(8, dominance.top1 - 1)); 
-    } 
-    else if (signalType === "under") {
-      // Dynamic Under: Use the lowest digit as a safe baseline
-      contractType = "DIGITUNDER";
-      // Guard: Keep barrier between 1 and 8
-      barrier = Math.max(1, Math.min(8, dominance.bottom1 + 1));
-    }
+    contractType = wave.type === "over" ? "DIGITOVER" : "DIGITUNDER";
+    barrier = wave.barrier;
     
-    // Sync the UI circles to show what the bot selected
+    // Sync UI
     selectedBarrier = barrier;
     document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
     document.querySelector(`.digit-circle[data-digit="${barrier}"]`)?.classList.add("selected");
     
-  } else {
-    // Manual or Fixed Mode
+    tradeHint.textContent = `Wave: ${wave.type.toUpperCase()} (${wave.strength.toFixed(0)}% dominance)`;
+    
+  } 
+  // 🚨 DYNAMIC CURSOR LOGIC
+  else if (autoModeSelect.value === "dynamic" && isAutoTrading) {
+    const dominance = calculateDigitDominance();
+    if (!dominance) {
+      tradeHint.textContent = "Collecting ticks...";
+      currentState = STATE.IDLE;
+      return;
+    }
+    
+    if (signalType === "even" || signalType === "odd") {
+      const isTopEven = (dominance.top1 % 2 === 0);
+      contractType = isTopEven ? "DIGITEVEN" : "DIGITODD";
+    } 
+    else if (signalType === "over") {
+      contractType = "DIGITOVER";
+      barrier = Math.max(1, Math.min(8, dominance.top1 - 1)); 
+    } 
+    else if (signalType === "under") {
+      contractType = "DIGITUNDER";
+      barrier = Math.max(1, Math.min(8, dominance.bottom1 + 1));
+    }
+    
+    selectedBarrier = barrier;
+    document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
+    document.querySelector(`.digit-circle[data-digit="${barrier}"]`)?.classList.add("selected");
+  } 
+  // 🚨 FIXED SIGNAL LOGIC
+  else {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
@@ -369,7 +385,17 @@ function requestTrade(signalType) {
   if (barrier !== null) req.barrier = String(barrier);
   
   ws.send(JSON.stringify(req));
-  tradeHint.textContent = `Requesting ${contractType}...`;
+}
+
+// Helper for Dynamic Cursor
+function calculateDigitDominance() {
+  if (tickHistory.length < 10) return null;
+  const freq = {};
+  for (let i = 0; i < 10; i++) freq[i] = 0;
+  tickHistory.forEach(d => freq[d]++);
+  const sorted = Object.keys(freq).map(d => ({ digit: parseInt(d), count: freq[d] }));
+  sorted.sort((a, b) => b.count - a.count);
+  return { top1: sorted[0].digit, bottom1: sorted[sorted.length - 1].digit };
 }
 
 function handleProposal(proposal) {
@@ -382,7 +408,6 @@ function handleBuy(buy) {
   if (currentState !== STATE.BUYING) return;
   currentContractId = buy.contract_id;
   currentState = STATE.MONITORING;
-  tradeHint.textContent = `Watching Contract...`;
   ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: currentContractId, subscribe: 1, req_id: reqId++ }));
 }
 
@@ -423,6 +448,7 @@ function handleContractUpdate(contract) {
     setTimeout(() => {
       if (!isAutoTrading) return;
       currentState = STATE.IDLE;
+      // For Wave mode, we pass a dummy type; the wave logic overrides it anyway
       requestTrade(autoSignalSelect.value);
     }, 500);
   } else {
@@ -452,7 +478,8 @@ startAutoBtn.addEventListener("click", () => {
   enableTradeButtons(false);
   currentMartingaleStep = 1;
   
-  tradeHint.textContent = `🤖 Auto Trading (${autoModeSelect.value})...`;
+  const mode = autoModeSelect.value;
+  tradeHint.textContent = `🤖 ${mode === "wave" ? "Wave Dominance" : mode === "dynamic" ? "Dynamic Cursor" : "Fixed Signal"} Active...`;
   requestTrade(autoSignalSelect.value);
 });
 
@@ -475,7 +502,7 @@ resetHistoryBtn.addEventListener("click", () => {
 marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
-  tickHistory = []; // Reset history on market change
+  tickHistory = [];
   subscribeTicks();
 });
 
