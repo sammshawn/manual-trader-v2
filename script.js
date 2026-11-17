@@ -1,6 +1,6 @@
 // ============================================
-//  AUTO TRADER PRO — v15.0 (Fixed Rise/Fall)
-//  Rise = PUT, Fall = CALL (Deriv API standard)
+//  AUTO TRADER PRO — v16.0 (Rise/Fall Corrected)
+//  Rise = PUT, Fall = CALL. No barrier for Rise/Fall.
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -65,7 +65,7 @@ const autoModeSelect = $("autoModeSelect");
 const DECIMALS_MAP = { R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2, "1HZ10V": 2, "1HZ25V": 2, "1HZ50V": 2, "1HZ75V": 2, "1HZ100V": 2 };
 let resultCount = 0;
 
-// ---- ADD RISE/FALL OPTIONS ----
+// ---- ADD RISE/FALL OPTIONS DYNAMICALLY ----
 const modeSelect = document.getElementById("autoModeSelect");
 const riseFallMode = document.createElement("option");
 riseFallMode.value = "risefall";
@@ -317,12 +317,12 @@ function requestTrade(signalType) {
   let contractType = null;
   let barrier = null;
 
-  // 🚨 RISE/FALL MODE (Corrected Mapping: Rise=PUT, Fall=CALL)
+  // 🚨 RISE/FALL MODE (Corrected: Rise = PUT, Fall = CALL per Deriv docs)
   if (autoModeSelect.value === "risefall" && isAutoTrading) {
     if (signalType === "rise") contractType = "PUT";   // Rise uses PUT [citation:1]
     else if (signalType === "fall") contractType = "CALL"; // Fall uses CALL [citation:1]
     else { currentState = STATE.IDLE; return; }
-    // No barrier needed for Rise/Fall
+    // NO BARRIER for Rise/Fall
   }
   else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
@@ -343,7 +343,11 @@ function requestTrade(signalType) {
     currency: activeAccount.currency, duration: 1, duration_unit: "t",
     underlying_symbol: currentMarket, req_id: reqId++,
   };
-  if (barrier !== null) req.barrier = String(barrier);
+  
+  // Only add barrier for digit contracts
+  if (barrier !== null && contractType.includes("DIGIT")) {
+    req.barrier = String(barrier);
+  }
 
   ws.send(JSON.stringify(req));
   tradeHint.textContent = `Requesting ${contractType} @ $${stake}...`;
