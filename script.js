@@ -1,6 +1,6 @@
 // ============================================
-//  AUTO TRADER PRO — v5.0 (State Machine)
-//  Bulletproof Result Logging + Continuous Loop
+//  AUTO TRADER PRO — v7.0 (Dominance Tracker)
+//  Dynamic Cursor now uses 20-tick statistical dominance
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -13,30 +13,23 @@ let accessToken = null;
 let activeAccount = null;
 let ws = null;
 let reqId = 1;
+let pingInterval = null; 
+let reconnectAttempts = 0;
 
 // --- BOT STATE MACHINE ---
-const STATE = {
-  IDLE: "IDLE",
-  PRICING: "PRICING",
-  BUYING: "BUYING",
-  MONITORING: "MONITORING",
-  SETTLED: "SETTLED"
-};
+const STATE = { IDLE: "IDLE", PRICING: "PRICING", BUYING: "BUYING", MONITORING: "MONITORING", SETTLED: "SETTLED" };
 let currentState = STATE.IDLE;
 
 let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
-let currentContractId = null; // 🚨 CRITICAL FIX
+let currentContractId = null;
+let tickHistory = []; // 🚨 Stores the last 20 digits
 
-// Bot Config
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
 
-// Stats
-let totalWins = 0;
-let totalLosses = 0;
-let totalPL = 0;
+let totalWins = 0, totalLosses = 0, totalPL = 0;
 
 const $ = (id) => document.getElementById(id);
 const loginScreen = $("loginScreen");
@@ -202,7 +195,10 @@ async function selectAccount(acc) {
   pillReal.classList.toggle("active", activeAccount.type === "real");
   accId.textContent = activeAccount.id;
   accountInfo.style.display = "flex";
-  if (ws) ws.close();
+  if (ws) {
+    clearInterval(pingInterval);
+    ws.close();
+  }
   await connectWS();
 }
 
@@ -216,6 +212,7 @@ async function connectWS() {
     ws = new WebSocket(data.data.url);
 
     ws.onopen = () => {
+      reconnectAttempts = 0;
       ws.send(JSON.stringify({ balance: 1, subscribe: 1, req_id: reqId++ }));
       subscribeTicks();
       loginScreen.style.display = "none";
@@ -223,6 +220,11 @@ async function connectWS() {
       buildCircles();
       updateDashboardStats();
       currentState = STATE.IDLE;
+
+      clearInterval(pingInterval);
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
+      }, 25000);
     };
 
     ws.onmessage = (event) => {
@@ -238,18 +240,23 @@ async function connectWS() {
       }
       if (msg.msg_type === "balance") balanceEl.textContent = `$${parseFloat(msg.balance.balance).toFixed(2)}`;
       if (msg.msg_type === "tick") handleTick(msg.tick);
-      
-      // STATE MACHINE ROUTING
       if (msg.msg_type === "proposal") handleProposal(msg.proposal);
       if (msg.msg_type === "buy") handleBuy(msg.buy);
-      
-      // 🚨 CRITICAL: Handle Contract Settlement
-      if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) {
-        handleContractUpdate(msg.proposal_open_contract);
-      }
+      if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) handleContractUpdate(msg.proposal_open_contract);
     };
 
-    ws.onclose = () => console.log("WS closed");
+    ws.onclose = () => {
+      clearInterval(pingInterval);
+      if (accessToken && activeAccount && reconnectAttempts < 3) {
+        reconnectAttempts++;
+        tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
+        setTimeout(connectWS, 2000);
+      } else {
+        tradeHint.textContent = "Disconnected. Please refresh.";
+        currentState = STATE.IDLE;
+        enableTradeButtons(true);
+      }
+    };
   } catch (err) { console.warn("Connection failed:", err); }
 }
 
@@ -261,7 +268,7 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER ----
+// ---- TICK HANDLER & DOMINANCE TRACKER ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
@@ -269,9 +276,32 @@ function handleTick(tick) {
   lastDigit = parseInt(priceStr.slice(-1), 10);
   lastPriceEl.textContent = priceStr;
   
+  // 🚨 Update tick history for Dominance Tracker
+  tickHistory.push(lastDigit);
+  if (tickHistory.length > 20) tickHistory.shift();
+
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
+}
+
+// 🚨 THE DOMINANCE CALCULATOR
+function calculateDominance() {
+  if (tickHistory.length < 10) return null; // Need at least 10 ticks
+  
+  // 1. Count frequencies
+  const freq = {};
+  for (let i = 0; i < 10; i++) freq[i] = 0;
+  tickHistory.forEach(d => freq[d]++);
+
+  // 2. Sort by frequency
+  const sorted = Object.keys(freq).map(d => ({ digit: parseInt(d), count: freq[d] }));
+  sorted.sort((a, b) => b.count - a.count);
+  
+  const top1 = sorted[0].digit;
+  const bottom1 = sorted[sorted.length - 1].digit;
+
+  return { top1, bottom1, sorted };
 }
 
 // ---- TRADING FLOW ----
@@ -288,10 +318,47 @@ function requestTrade(signalType) {
   enableTradeButtons(false);
   
   let contractType, barrier = null;
-  if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
-  else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
-  else if (signalType === "even") { contractType = "DIGITEVEN"; }
-  else if (signalType === "odd") { contractType = "DIGITODD"; }
+
+  // 🚨 APPLY DOMINANCE LOGIC IF DYNAMIC
+  if (autoModeSelect.value === "dynamic" && isAutoTrading) {
+    const dominance = calculateDominance();
+    if (!dominance) {
+      tradeHint.textContent = "Collecting ticks for dominance...";
+      currentState = STATE.IDLE;
+      return; // Wait for more ticks
+    }
+    
+    if (signalType === "even" || signalType === "odd") {
+      // Dynamic Even/Odd: Check if top dominant digit is Even or Odd
+      const isTopEven = (dominance.top1 % 2 === 0);
+      contractType = isTopEven ? "DIGITEVEN" : "DIGITODD";
+      tradeHint.textContent = `Dominance says ${isTopEven ? "EVEN" : "ODD"} is strong.`;
+    } 
+    else if (signalType === "over") {
+      // Dynamic Over: Use the top dominant digit as a safe baseline
+      contractType = "DIGITOVER";
+      // Guard: Keep barrier between 1 and 8 to ensure valid trade
+      barrier = Math.max(1, Math.min(8, dominance.top1 - 1)); 
+    } 
+    else if (signalType === "under") {
+      // Dynamic Under: Use the lowest digit as a safe baseline
+      contractType = "DIGITUNDER";
+      // Guard: Keep barrier between 1 and 8
+      barrier = Math.max(1, Math.min(8, dominance.bottom1 + 1));
+    }
+    
+    // Sync the UI circles to show what the bot selected
+    selectedBarrier = barrier;
+    document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
+    document.querySelector(`.digit-circle[data-digit="${barrier}"]`)?.classList.add("selected");
+    
+  } else {
+    // Manual or Fixed Mode
+    if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
+    else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
+    else if (signalType === "even") { contractType = "DIGITEVEN"; }
+    else if (signalType === "odd") { contractType = "DIGITODD"; }
+  }
 
   const stake = getStake();
   const req = {
@@ -302,7 +369,7 @@ function requestTrade(signalType) {
   if (barrier !== null) req.barrier = String(barrier);
   
   ws.send(JSON.stringify(req));
-  tradeHint.textContent = `Requesting ${signalType.toUpperCase()}...`;
+  tradeHint.textContent = `Requesting ${contractType}...`;
 }
 
 function handleProposal(proposal) {
@@ -313,44 +380,35 @@ function handleProposal(proposal) {
 
 function handleBuy(buy) {
   if (currentState !== STATE.BUYING) return;
-  currentContractId = buy.contract_id; // 🚨 SAVE ID
+  currentContractId = buy.contract_id;
   currentState = STATE.MONITORING;
-  tradeHint.textContent = `Watching Contract ${currentContractId}...`;
-  
-  // Subscribe to the specific contract for settlement
+  tradeHint.textContent = `Watching Contract...`;
   ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: currentContractId, subscribe: 1, req_id: reqId++ }));
 }
 
-// 🚨 THE SETTLEMENT HANDLER
 function handleContractUpdate(contract) {
-  // Only process if we are monitoring AND it's our contract AND it's sold
   if (currentState !== STATE.MONITORING) return;
   if (contract.contract_id !== currentContractId) return;
   if (!contract.is_sold) return;
 
-  // Process Result
   const profit = parseFloat(contract.profit) || 0;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
   const entrySpot = contract.entry_spot ? parseFloat(contract.entry_spot).toFixed(decimals) : "—";
   const exitSpot = contract.exit_spot ? parseFloat(contract.exit_spot).toFixed(decimals) : "—";
 
   addResult(profit > 0 ? "win" : "loss", profit, entrySpot, exitSpot);
-  ws.send(JSON.stringify({ forget: contract.id, req_id: reqId++ })); // Clean up subscription
+  ws.send(JSON.stringify({ forget: contract.id, req_id: reqId++ }));
 
-  // Reset State
   currentState = STATE.SETTLED;
   currentContractId = null;
 
-  // Martingale Logic
-  if (profit > 0) {
-    currentMartingaleStep = 1;
-  } else {
+  if (profit > 0) currentMartingaleStep = 1;
+  else {
     const maxSteps = parseInt(maxStepsInput.value, 10);
     if (currentMartingaleStep < maxSteps) currentMartingaleStep++;
-    else currentMartingaleStep = 1; // Reset if max hit
+    else currentMartingaleStep = 1;
   }
 
-  // TP/SL Check
   const tp = parseFloat(tpInput.value);
   const sl = parseFloat(slInput.value);
   if (totalPL >= tp || totalPL <= -sl) {
@@ -361,22 +419,12 @@ function handleContractUpdate(contract) {
     return;
   }
 
-  // CONTINUOUS LOOP
   if (isAutoTrading) {
     setTimeout(() => {
       if (!isAutoTrading) return;
-      
-      // Dynamic Cursor Mode: Update barrier to last digit before trading
-      if (autoModeSelect.value === "dynamic" && lastDigit !== null) {
-        selectedBarrier = lastDigit;
-        document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
-        document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`)?.classList.add("selected");
-      }
-      
-      // Fire the next trade
       currentState = STATE.IDLE;
       requestTrade(autoSignalSelect.value);
-    }, 500); // 500ms cooldown
+    }, 500);
   } else {
     currentState = STATE.IDLE;
     enableTradeButtons(true);
@@ -427,11 +475,13 @@ resetHistoryBtn.addEventListener("click", () => {
 marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
+  tickHistory = []; // Reset history on market change
   subscribeTicks();
 });
 
 logoutBtn.addEventListener("click", () => {
   sessionStorage.removeItem("deriv_access_token");
+  if (pingInterval) clearInterval(pingInterval);
   if (ws) ws.close();
   accessToken = null; activeAccount = null; isAutoTrading = false;
   loginScreen.style.display = "flex"; tradingScreen.style.display = "none";
