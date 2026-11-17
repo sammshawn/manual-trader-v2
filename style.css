@@ -74,6 +74,21 @@ body { font-family: 'Inter', system-ui, sans-serif; background: radial-gradient(
 .stake-row input, .stake-row select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.8rem; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; outline: none; }
 .stake-row input:focus { border-color: var(--blue); }
 
+/* WAVE BANNER */
+.wave-banner { display: none; background: rgba(59, 130, 246, 0.1); border: 1px solid var(--blue); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; animation: slideDown 0.3s ease-out; }
+.wave-banner.show { display: block; }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+.wave-header { display: flex; justify-content: space-between; font-weight: 800; font-size: 0.9rem; color: var(--blue); margin-bottom: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.wave-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+.wave-stat { background: rgba(0,0,0,0.4); border-radius: 8px; padding: 0.5rem; text-align: center; border: 1px solid var(--border); }
+.wave-stat.high { border-left: 3px solid var(--green); }
+.wave-stat.low { border-left: 3px solid var(--red); }
+.ws-label { display: block; font-size: 0.65rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.2rem; }
+.ws-value { font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; font-weight: 800; }
+.wave-stat.high .ws-value { color: var(--green); }
+.wave-stat.low .ws-value { color: var(--red); }
+.wave-stat.pct .ws-value { color: var(--amber); }
+
 .trade-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-bottom: 1rem; }
 .btn-trade { padding: 0.9rem 0.5rem; border-radius: 12px; font-family: inherit; font-weight: 800; font-size: 0.95rem; letter-spacing: 0.05em; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
 .btn-trade:disabled { opacity: 0.4; cursor: not-allowed; }

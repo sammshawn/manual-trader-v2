@@ -1,6 +1,5 @@
 // ============================================
-//  AUTO TRADER PRO — v8.0 (Wave Dominance)
-//  Added: Wave Dominance Mode (Auto-detects Over/Under)
+//  AUTO TRADER PRO — v9.0 (Wave X-Ray)
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -16,7 +15,6 @@ let reqId = 1;
 let pingInterval = null; 
 let reconnectAttempts = 0;
 
-// --- BOT STATE MACHINE ---
 const STATE = { IDLE: "IDLE", PRICING: "PRICING", BUYING: "BUYING", MONITORING: "MONITORING", SETTLED: "SETTLED" };
 let currentState = STATE.IDLE;
 
@@ -24,7 +22,7 @@ let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
 let currentContractId = null;
-let tickHistory = []; // Stores last 20 digits
+let tickHistory = []; 
 
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
@@ -63,6 +61,13 @@ const startAutoBtn = $("startAutoBtn");
 const stopAutoBtn = $("stopAutoBtn");
 const autoSignalSelect = $("autoSignalSelect");
 const autoModeSelect = $("autoModeSelect");
+
+// 🚨 WAVE DOM ELEMENTS
+const waveBanner = $("waveBanner");
+const waveHighCount = $("waveHighCount");
+const waveLowCount = $("waveLowCount");
+const wavePct = $("wavePct");
+const waveSignal = $("waveSignal");
 
 const DECIMALS_MAP = { R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2, "1HZ10V": 2, "1HZ25V": 2, "1HZ50V": 2, "1HZ75V": 2, "1HZ100V": 2 };
 let resultCount = 0;
@@ -220,6 +225,9 @@ async function connectWS() {
       buildCircles();
       updateDashboardStats();
       currentState = STATE.IDLE;
+      
+      // Show Wave Banner if already selected
+      if (autoModeSelect.value === "wave") waveBanner.classList.add("show");
 
       clearInterval(pingInterval);
       pingInterval = setInterval(() => {
@@ -268,7 +276,7 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER ----
+// ---- TICK HANDLER & LIVE WAVE UI ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
@@ -282,14 +290,34 @@ function handleTick(tick) {
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
+
+  // 🚨 UPDATE WAVE BANNER LIVE
+  if (autoModeSelect.value === "wave") {
+    const wave = calculateWaveDominance();
+    if (wave) {
+      waveHighCount.textContent = wave.highCount;
+      waveLowCount.textContent = wave.lowCount;
+      wavePct.textContent = `${wave.strength.toFixed(0)}%`;
+      if (wave.type === "over") {
+        waveSignal.textContent = "OVER SIGNAL READY 🟢";
+        waveSignal.style.color = "var(--green)";
+      } else if (wave.type === "under") {
+        waveSignal.textContent = "UNDER SIGNAL READY 🔴";
+        waveSignal.style.color = "var(--red)";
+      } else {
+        waveSignal.textContent = "Waiting for 60% dominance...";
+        waveSignal.style.color = "var(--amber)";
+      }
+    }
+  }
 }
 
 // 🚨 WAVE DOMINANCE CALCULATOR
 function calculateWaveDominance() {
-  if (tickHistory.length < 10) return null;
+  if (tickHistory.length < 5) return null;
   
-  let highCount = 0; // 5,6,7,8,9
-  let lowCount = 0;  // 0,1,2,3,4
+  let highCount = 0;
+  let lowCount = 0;
 
   tickHistory.forEach(d => {
     if (d >= 5) highCount++;
@@ -300,11 +328,14 @@ function calculateWaveDominance() {
   const highPct = (highCount / total) * 100;
   const lowPct = (lowCount / total) * 100;
 
-  // Need 60% dominance to trigger a signal
-  if (highPct >= 60) return { type: "over", barrier: 4, strength: highPct };
-  if (lowPct >= 60) return { type: "under", barrier: 5, strength: lowPct };
-  
-  return null; // No clear wave
+  let type = null;
+  let barrier = null;
+  let strength = 0;
+
+  if (highPct >= 60) { type = "over"; barrier = 4; strength = highPct; }
+  else if (lowPct >= 60) { type = "under"; barrier = 5; strength = lowPct; }
+
+  return { type, barrier, strength, highCount, lowCount };
 }
 
 // ---- TRADING FLOW ----
@@ -322,27 +353,21 @@ function requestTrade(signalType) {
   
   let contractType, barrier = null;
 
-  // 🚨 WAVE DOMINANCE LOGIC
   if (autoModeSelect.value === "wave" && isAutoTrading) {
     const wave = calculateWaveDominance();
-    if (!wave) {
-      tradeHint.textContent = "Scanning wave... No clear dominance yet.";
+    if (!wave || !wave.type) {
+      tradeHint.textContent = "Scanning wave... No signal yet.";
       currentState = STATE.IDLE;
       return; 
     }
     
     contractType = wave.type === "over" ? "DIGITOVER" : "DIGITUNDER";
     barrier = wave.barrier;
-    
-    // Sync UI
     selectedBarrier = barrier;
     document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
     document.querySelector(`.digit-circle[data-digit="${barrier}"]`)?.classList.add("selected");
     
-    tradeHint.textContent = `Wave: ${wave.type.toUpperCase()} (${wave.strength.toFixed(0)}% dominance)`;
-    
   } 
-  // 🚨 DYNAMIC CURSOR LOGIC
   else if (autoModeSelect.value === "dynamic" && isAutoTrading) {
     const dominance = calculateDigitDominance();
     if (!dominance) {
@@ -368,7 +393,6 @@ function requestTrade(signalType) {
     document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
     document.querySelector(`.digit-circle[data-digit="${barrier}"]`)?.classList.add("selected");
   } 
-  // 🚨 FIXED SIGNAL LOGIC
   else {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
@@ -387,7 +411,6 @@ function requestTrade(signalType) {
   ws.send(JSON.stringify(req));
 }
 
-// Helper for Dynamic Cursor
 function calculateDigitDominance() {
   if (tickHistory.length < 10) return null;
   const freq = {};
@@ -448,7 +471,6 @@ function handleContractUpdate(contract) {
     setTimeout(() => {
       if (!isAutoTrading) return;
       currentState = STATE.IDLE;
-      // For Wave mode, we pass a dummy type; the wave logic overrides it anyway
       requestTrade(autoSignalSelect.value);
     }, 500);
   } else {
@@ -478,8 +500,15 @@ startAutoBtn.addEventListener("click", () => {
   enableTradeButtons(false);
   currentMartingaleStep = 1;
   
-  const mode = autoModeSelect.value;
-  tradeHint.textContent = `🤖 ${mode === "wave" ? "Wave Dominance" : mode === "dynamic" ? "Dynamic Cursor" : "Fixed Signal"} Active...`;
+  if (autoModeSelect.value === "wave") {
+    tradeHint.textContent = `🤖 Wave Dominance Active...`;
+    waveBanner.classList.add("show"); // 🚨 SHOW BANNER
+  } else if (autoModeSelect.value === "dynamic") {
+    tradeHint.textContent = `🤖 Dynamic Cursor Active...`;
+  } else {
+    tradeHint.textContent = `🤖 Fixed Signal Active...`;
+  }
+  
   requestTrade(autoSignalSelect.value);
 });
 
@@ -491,6 +520,15 @@ function stopAutoTrade() {
   tradeHint.textContent = "Auto Stopped.";
 }
 stopAutoBtn.addEventListener("click", stopAutoTrade);
+
+// 🚨 TOGGLE BANNER ON DROPDOWN CHANGE
+autoModeSelect.addEventListener("change", () => {
+  if (autoModeSelect.value === "wave") {
+    waveBanner.classList.add("show");
+  } else {
+    waveBanner.classList.remove("show");
+  }
+});
 
 resetHistoryBtn.addEventListener("click", () => {
   resultsLog.innerHTML = '<p class="empty-log">No trades yet. Place your first trade above.</p>';
