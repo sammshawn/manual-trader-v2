@@ -1,9 +1,9 @@
 // ============================================
-//  AUTO TRADER PRO — v14.0 (Rise/Fall Support)
-//  Added: Rise/Fall mode with continuous trading
+//  AUTO TRADER PRO — v15.0 (Fixed Rise/Fall)
+//  Rise = PUT, Fall = CALL (Deriv API standard)
 // ============================================
 
-const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN"; // Your App ID
+const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const AUTH_URL = "https://auth.deriv.com/oauth2/auth";
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
@@ -65,7 +65,7 @@ const autoModeSelect = $("autoModeSelect");
 const DECIMALS_MAP = { R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2, "1HZ10V": 2, "1HZ25V": 2, "1HZ50V": 2, "1HZ75V": 2, "1HZ100V": 2 };
 let resultCount = 0;
 
-// ---- ADD RISE/FALL OPTIONS DYNAMICALLY ----
+// ---- ADD RISE/FALL OPTIONS ----
 const modeSelect = document.getElementById("autoModeSelect");
 const riseFallMode = document.createElement("option");
 riseFallMode.value = "risefall";
@@ -297,7 +297,6 @@ function handleTick(tick) {
 
   // 🚨 RISE/FALL CONTINUOUS TRADING
   if (autoModeSelect.value === "risefall" && isAutoTrading && currentState === STATE.IDLE) {
-    // Determine which signal to use (rise or fall)
     const signal = autoSignalSelect.value === "rise" ? "rise" : "fall";
     requestTrade(signal);
   }
@@ -318,14 +317,13 @@ function requestTrade(signalType) {
   let contractType = null;
   let barrier = null;
 
-  // 🚨 RISE/FALL MODE
+  // 🚨 RISE/FALL MODE (Corrected Mapping: Rise=PUT, Fall=CALL)
   if (autoModeSelect.value === "risefall" && isAutoTrading) {
-    if (signalType === "rise") contractType = "CALL";
-    else if (signalType === "fall") contractType = "PUT";
+    if (signalType === "rise") contractType = "PUT";   // Rise uses PUT [citation:1]
+    else if (signalType === "fall") contractType = "CALL"; // Fall uses CALL [citation:1]
     else { currentState = STATE.IDLE; return; }
     // No barrier needed for Rise/Fall
   }
-  // Over/Under (Digit) mode
   else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
@@ -333,13 +331,10 @@ function requestTrade(signalType) {
     else if (signalType === "odd") { contractType = "DIGITODD"; }
   }
   else {
-    // Fallback for manual modes
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
     else if (signalType === "odd") { contractType = "DIGITODD"; }
-    else if (signalType === "rise") { contractType = "CALL"; }
-    else if (signalType === "fall") { contractType = "PUT"; }
   }
 
   const stake = getStake();
@@ -401,7 +396,6 @@ function handleContractUpdate(contract) {
   }
 
   if (isAutoTrading) {
-    // The next tick will trigger the next trade automatically
     tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready for next...`;
   } else {
     enableTradeButtons(true);
@@ -433,11 +427,9 @@ startAutoBtn.addEventListener("click", () => {
   const mode = autoModeSelect.value;
   if (mode === "risefall") {
     tradeHint.textContent = `🤖 Rise/Fall Active (${autoSignalSelect.value.toUpperCase()})...`;
-    // Fire immediately
     requestTrade(autoSignalSelect.value);
   } else if (mode === "wave") {
     tradeHint.textContent = `🤖 Wave Dominance Active...`;
-    // Wave is triggered by tick handler
   } else {
     tradeHint.textContent = `🤖 Auto Active (${mode})...`;
     requestTrade(autoSignalSelect.value);
