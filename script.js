@@ -1,9 +1,9 @@
 // ============================================
-//  AUTO TRADER PRO — v7.0 (Dominance Tracker)
-//  Dynamic Cursor now uses 20-tick statistical dominance
+//  AUTO TRADER PRO — v14.0 (Rise/Fall Support)
+//  Added: Rise/Fall mode with continuous trading
 // ============================================
 
-const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
+const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN"; // Your App ID
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const AUTH_URL = "https://auth.deriv.com/oauth2/auth";
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
@@ -16,18 +16,17 @@ let reqId = 1;
 let pingInterval = null; 
 let reconnectAttempts = 0;
 
-// --- BOT STATE MACHINE ---
-const STATE = { IDLE: "IDLE", PRICING: "PRICING", BUYING: "BUYING", MONITORING: "MONITORING", SETTLED: "SETTLED" };
+const STATE = { IDLE: "IDLE", PRICING: "PRICING", BUYING: "BUYING", MONITORING: "MONITORING" };
 let currentState = STATE.IDLE;
 
 let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
 let currentContractId = null;
-let tickHistory = []; // 🚨 Stores the last 20 digits
 
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
+let baseStake = 0.35;
 
 let totalWins = 0, totalLosses = 0, totalPL = 0;
 
@@ -47,7 +46,6 @@ const stakeInput = $("stakeInput");
 const tpInput = $("tpInput");
 const slInput = $("slInput");
 const martingaleMult = $("martingaleMult");
-const maxStepsInput = $("maxStepsInput");
 const resultsLog = $("resultsLog");
 const resultsCount = $("resultsCount");
 const tradeHint = $("tradeHint");
@@ -66,6 +64,23 @@ const autoModeSelect = $("autoModeSelect");
 
 const DECIMALS_MAP = { R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2, "1HZ10V": 2, "1HZ25V": 2, "1HZ50V": 2, "1HZ75V": 2, "1HZ100V": 2 };
 let resultCount = 0;
+
+// ---- ADD RISE/FALL OPTIONS DYNAMICALLY ----
+const modeSelect = document.getElementById("autoModeSelect");
+const riseFallMode = document.createElement("option");
+riseFallMode.value = "risefall";
+riseFallMode.text = "Rise / Fall";
+modeSelect.appendChild(riseFallMode);
+
+const signalSelect = document.getElementById("autoSignalSelect");
+const riseSignal = document.createElement("option");
+riseSignal.value = "rise";
+riseSignal.text = "Auto RISE";
+signalSelect.appendChild(riseSignal);
+const fallSignal = document.createElement("option");
+fallSignal.value = "fall";
+fallSignal.text = "Auto FALL";
+signalSelect.appendChild(fallSignal);
 
 // ---- UI BUILDERS ----
 function buildCircles() {
@@ -268,96 +283,63 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER & DOMINANCE TRACKER ----
+// ---- TICK HANDLER ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
   const priceStr = parseFloat(tick.quote).toFixed(decimals);
   lastDigit = parseInt(priceStr.slice(-1), 10);
   lastPriceEl.textContent = priceStr;
-  
-  // 🚨 Update tick history for Dominance Tracker
-  tickHistory.push(lastDigit);
-  if (tickHistory.length > 20) tickHistory.shift();
 
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
-}
 
-// 🚨 THE DOMINANCE CALCULATOR
-function calculateDominance() {
-  if (tickHistory.length < 10) return null; // Need at least 10 ticks
-  
-  // 1. Count frequencies
-  const freq = {};
-  for (let i = 0; i < 10; i++) freq[i] = 0;
-  tickHistory.forEach(d => freq[d]++);
-
-  // 2. Sort by frequency
-  const sorted = Object.keys(freq).map(d => ({ digit: parseInt(d), count: freq[d] }));
-  sorted.sort((a, b) => b.count - a.count);
-  
-  const top1 = sorted[0].digit;
-  const bottom1 = sorted[sorted.length - 1].digit;
-
-  return { top1, bottom1, sorted };
+  // 🚨 RISE/FALL CONTINUOUS TRADING
+  if (autoModeSelect.value === "risefall" && isAutoTrading && currentState === STATE.IDLE) {
+    // Determine which signal to use (rise or fall)
+    const signal = autoSignalSelect.value === "rise" ? "rise" : "fall";
+    requestTrade(signal);
+  }
 }
 
 // ---- TRADING FLOW ----
 function getStake() {
-  const base = parseFloat(stakeInput.value);
-  const mult = parseFloat(martingaleMult.value);
-  return (base * Math.pow(mult, currentMartingaleStep - 1)).toFixed(2);
+  const mult = parseFloat(martingaleMult.value) || 1;
+  return (baseStake * Math.pow(mult, currentMartingaleStep - 1)).toFixed(2);
 }
 
 function requestTrade(signalType) {
   if (currentState !== STATE.IDLE || !ws || ws.readyState !== WebSocket.OPEN) return;
-  
+
   currentState = STATE.PRICING;
   enableTradeButtons(false);
-  
-  let contractType, barrier = null;
 
-  // 🚨 APPLY DOMINANCE LOGIC IF DYNAMIC
-  if (autoModeSelect.value === "dynamic" && isAutoTrading) {
-    const dominance = calculateDominance();
-    if (!dominance) {
-      tradeHint.textContent = "Collecting ticks for dominance...";
-      currentState = STATE.IDLE;
-      return; // Wait for more ticks
-    }
-    
-    if (signalType === "even" || signalType === "odd") {
-      // Dynamic Even/Odd: Check if top dominant digit is Even or Odd
-      const isTopEven = (dominance.top1 % 2 === 0);
-      contractType = isTopEven ? "DIGITEVEN" : "DIGITODD";
-      tradeHint.textContent = `Dominance says ${isTopEven ? "EVEN" : "ODD"} is strong.`;
-    } 
-    else if (signalType === "over") {
-      // Dynamic Over: Use the top dominant digit as a safe baseline
-      contractType = "DIGITOVER";
-      // Guard: Keep barrier between 1 and 8 to ensure valid trade
-      barrier = Math.max(1, Math.min(8, dominance.top1 - 1)); 
-    } 
-    else if (signalType === "under") {
-      // Dynamic Under: Use the lowest digit as a safe baseline
-      contractType = "DIGITUNDER";
-      // Guard: Keep barrier between 1 and 8
-      barrier = Math.max(1, Math.min(8, dominance.bottom1 + 1));
-    }
-    
-    // Sync the UI circles to show what the bot selected
-    selectedBarrier = barrier;
-    document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("selected"));
-    document.querySelector(`.digit-circle[data-digit="${barrier}"]`)?.classList.add("selected");
-    
-  } else {
-    // Manual or Fixed Mode
+  let contractType = null;
+  let barrier = null;
+
+  // 🚨 RISE/FALL MODE
+  if (autoModeSelect.value === "risefall" && isAutoTrading) {
+    if (signalType === "rise") contractType = "CALL";
+    else if (signalType === "fall") contractType = "PUT";
+    else { currentState = STATE.IDLE; return; }
+    // No barrier needed for Rise/Fall
+  }
+  // Over/Under (Digit) mode
+  else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
     else if (signalType === "odd") { contractType = "DIGITODD"; }
+  }
+  else {
+    // Fallback for manual modes
+    if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
+    else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
+    else if (signalType === "even") { contractType = "DIGITEVEN"; }
+    else if (signalType === "odd") { contractType = "DIGITODD"; }
+    else if (signalType === "rise") { contractType = "CALL"; }
+    else if (signalType === "fall") { contractType = "PUT"; }
   }
 
   const stake = getStake();
@@ -367,9 +349,9 @@ function requestTrade(signalType) {
     underlying_symbol: currentMarket, req_id: reqId++,
   };
   if (barrier !== null) req.barrier = String(barrier);
-  
+
   ws.send(JSON.stringify(req));
-  tradeHint.textContent = `Requesting ${contractType}...`;
+  tradeHint.textContent = `Requesting ${contractType} @ $${stake}...`;
 }
 
 function handleProposal(proposal) {
@@ -382,7 +364,6 @@ function handleBuy(buy) {
   if (currentState !== STATE.BUYING) return;
   currentContractId = buy.contract_id;
   currentState = STATE.MONITORING;
-  tradeHint.textContent = `Watching Contract...`;
   ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: currentContractId, subscribe: 1, req_id: reqId++ }));
 }
 
@@ -399,34 +380,30 @@ function handleContractUpdate(contract) {
   addResult(profit > 0 ? "win" : "loss", profit, entrySpot, exitSpot);
   ws.send(JSON.stringify({ forget: contract.id, req_id: reqId++ }));
 
-  currentState = STATE.SETTLED;
+  currentState = STATE.IDLE;
   currentContractId = null;
 
-  if (profit > 0) currentMartingaleStep = 1;
-  else {
-    const maxSteps = parseInt(maxStepsInput.value, 10);
-    if (currentMartingaleStep < maxSteps) currentMartingaleStep++;
-    else currentMartingaleStep = 1;
+  // Martingale
+  if (profit > 0) {
+    currentMartingaleStep = 1;
+  } else {
+    currentMartingaleStep++;
   }
 
+  // TP/SL Check
   const tp = parseFloat(tpInput.value);
   const sl = parseFloat(slInput.value);
   if (totalPL >= tp || totalPL <= -sl) {
     stopAutoTrade();
     tradeHint.textContent = totalPL >= tp ? "🎯 TP Hit!" : "🛑 SL Hit!";
-    currentState = STATE.IDLE;
     enableTradeButtons(true);
     return;
   }
 
   if (isAutoTrading) {
-    setTimeout(() => {
-      if (!isAutoTrading) return;
-      currentState = STATE.IDLE;
-      requestTrade(autoSignalSelect.value);
-    }, 500);
+    // The next tick will trigger the next trade automatically
+    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready for next...`;
   } else {
-    currentState = STATE.IDLE;
     enableTradeButtons(true);
     tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
   }
@@ -451,9 +428,20 @@ startAutoBtn.addEventListener("click", () => {
   stopAutoBtn.disabled = false;
   enableTradeButtons(false);
   currentMartingaleStep = 1;
-  
-  tradeHint.textContent = `🤖 Auto Trading (${autoModeSelect.value})...`;
-  requestTrade(autoSignalSelect.value);
+  baseStake = parseFloat(stakeInput.value);
+
+  const mode = autoModeSelect.value;
+  if (mode === "risefall") {
+    tradeHint.textContent = `🤖 Rise/Fall Active (${autoSignalSelect.value.toUpperCase()})...`;
+    // Fire immediately
+    requestTrade(autoSignalSelect.value);
+  } else if (mode === "wave") {
+    tradeHint.textContent = `🤖 Wave Dominance Active...`;
+    // Wave is triggered by tick handler
+  } else {
+    tradeHint.textContent = `🤖 Auto Active (${mode})...`;
+    requestTrade(autoSignalSelect.value);
+  }
 });
 
 function stopAutoTrade() {
@@ -475,7 +463,6 @@ resetHistoryBtn.addEventListener("click", () => {
 marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
-  tickHistory = []; // Reset history on market change
   subscribeTicks();
 });
 
