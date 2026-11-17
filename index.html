@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9.0" />
+  <link rel="stylesheet" href="style.css?v=4.0" />
 </head>
 <body>
 
@@ -19,6 +19,7 @@
         Auto Trader Pro
       </div>
       
+      <!-- ACCOUNT SWITCHER -->
       <div class="account-switcher" id="accountSwitcher" style="display:none;">
         <div class="acc-pill demo active" id="pillDemo">🇺🇸 Demo</div>
         <div class="acc-pill real" id="pillReal">🇺🇸 Real</div>
@@ -50,6 +51,7 @@
     <!-- TRADING SCREEN -->
     <section class="trading-screen" id="tradingScreen" style="display:none;">
 
+      <!-- MARKET SELECTOR -->
       <div class="control-bar">
         <label class="market-select">
           <span>Market</span>
@@ -72,33 +74,15 @@
         </div>
       </div>
 
+      <!-- DIGIT CIRCLES -->
       <div class="digit-circles-wrap">
-        <div class="digit-circles" id="digitCircles"></div>
+        <div class="digit-circles" id="digitCircles">
+          <!-- Injected by JS -->
+        </div>
       </div>
 
+      <!-- MANUAL & AUTO TRADE PANEL -->
       <div class="trade-panel">
-        <!-- 🚨 WAVE X-RAY BANNER -->
-        <div class="wave-banner" id="waveBanner">
-          <div class="wave-header">
-            <span>🌊 Wave Dominance Tracker</span>
-            <span id="waveSignal" style="color: var(--amber);">Scanning...</span>
-          </div>
-          <div class="wave-stats">
-            <div class="wave-stat high">
-              <span class="ws-label">High Side (5-9)</span>
-              <span class="ws-value" id="waveHighCount">0</span>
-            </div>
-            <div class="wave-stat low">
-              <span class="ws-label">Low Side (0-4)</span>
-              <span class="ws-value" id="waveLowCount">0</span>
-            </div>
-            <div class="wave-stat pct">
-              <span class="ws-label">Dominance</span>
-              <span class="ws-value" id="wavePct">0%</span>
-            </div>
-          </div>
-        </div>
-
         <div class="stake-row">
           <label>Base Stake (USD)</label>
           <input type="number" id="stakeInput" value="0.35" min="0.35" step="0.01" />
@@ -123,6 +107,7 @@
           <input type="number" id="maxStepsInput" value="3" min="1" max="10" style="width: 70px;" />
         </div>
 
+        <!-- MANUAL BUTTONS -->
         <p style="font-size: 0.75rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.5rem;">Manual Trade</p>
         <div class="trade-buttons">
           <button class="btn-trade over" data-type="over">OVER</button>
@@ -131,13 +116,13 @@
           <button class="btn-trade odd" data-type="odd">ODD</button>
         </div>
 
+        <!-- AUTO TRADE CONTROLS -->
         <div class="auto-trade-box">
           <div class="auto-header">
             <span>Auto-Trade Engine</span>
             <select id="autoModeSelect" class="auto-mode-select">
               <option value="fixed">Fixed Signal</option>
               <option value="dynamic">Dynamic Cursor</option>
-              <option value="wave">Wave Dominance</option>
             </select>
           </div>
           
@@ -155,11 +140,23 @@
         </div>
       </div>
 
+      <!-- RESULTS DASHBOARD -->
       <div class="results-panel">
+        
+        <!-- DASHBOARD STATS -->
         <div class="stats-bar">
-          <div class="stat-item"><span class="stat-label">Wins</span><span class="stat-value win" id="statWins">0</span></div>
-          <div class="stat-item"><span class="stat-label">Losses</span><span class="stat-value loss" id="statLosses">0</span></div>
-          <div class="stat-item"><span class="stat-label">Total P/L</span><span class="stat-value" id="statPL">$0.00</span></div>
+          <div class="stat-item">
+            <span class="stat-label">Wins</span>
+            <span class="stat-value win" id="statWins">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Losses</span>
+            <span class="stat-value loss" id="statLosses">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Total P/L</span>
+            <span class="stat-value" id="statPL">$0.00</span>
+          </div>
         </div>
 
         <div class="results-header">
@@ -183,6 +180,6 @@
     <p>Auto Trader Pro · Trade at your own risk</p>
   </footer>
 
-  <script src="script.js?v=9.0"></script>
+  <script src="script.js?v=4.0"></script>
 </body>
 </html>
