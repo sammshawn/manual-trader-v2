@@ -1,5 +1,6 @@
 // ============================================
-//  AUTO TRADER PRO — v17.0 (Jump Scanner + Loop Fix)
+//  AUTO TRADER PRO — v18.0 (Rise/Fall Hardcoded Fix)
+//  Rise = PUT, Fall = CALL (Deriv official docs)
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -22,7 +23,7 @@ let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
 let currentContractId = null;
-let recentDigits = []; // For Jump Scanner
+let recentDigits = [];
 
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
@@ -63,7 +64,6 @@ const stopAutoBtn = $("stopAutoBtn");
 const autoSignalSelect = $("autoSignalSelect");
 const autoModeSelect = $("autoModeSelect");
 
-// Signal Panel DOM
 const signalStatus = $("signalStatus");
 const jumpDistanceEl = $("jumpDistance");
 const recentDigitsEl = $("recentDigits");
@@ -265,17 +265,14 @@ function handleTick(tick) {
   lastDigit = parseInt(priceStr.slice(-1), 10);
   lastPriceEl.textContent = priceStr;
 
-  // Update Circles
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
 
-  // 🚨 JUMP SCANNER LOGIC
   recentDigits.push(lastDigit);
   if (recentDigits.length > 6) recentDigits.shift();
   updateSignalScanner();
 
-  // 🚨 CONTINUOUS TRADING TRIGGER
   if (isAutoTrading && currentState === STATE.IDLE) {
     if (autoModeSelect.value === "risefall") {
       requestTrade(autoSignalSelect.value);
@@ -283,14 +280,12 @@ function handleTick(tick) {
   }
 }
 
-// 🚨 THE JUMP SCANNER
 function updateSignalScanner() {
   if (recentDigits.length < 6) {
     signalText.textContent = `Collecting ticks (${recentDigits.length}/6)...`;
     return;
   }
 
-  // Calculate Jump Distances
   let totalDistance = 0;
   for (let i = 1; i < recentDigits.length; i++) {
     totalDistance += Math.abs(recentDigits[i] - recentDigits[i-1]);
@@ -298,12 +293,8 @@ function updateSignalScanner() {
   const avgDistance = totalDistance / (recentDigits.length - 1);
   jumpDistanceEl.textContent = avgDistance.toFixed(1);
 
-  // Display Recent Digits
   recentDigitsEl.innerHTML = recentDigits.map(d => `<span class="recent-digit">${d}</span>`).join("");
 
-  // Determine Signal
-  // Small jumps (avg < 2.5) = Smooth = Fall (PUT)
-  // Large jumps (avg >= 2.5) = Jumpy = Rise (CALL)
   if (avgDistance < 2.5) {
     signalBox.className = "signal-box fall";
     signalIcon.textContent = "📉";
@@ -324,21 +315,26 @@ function getStake() {
   const mult = parseFloat(martingaleMult.value) || 1;
   return (baseStake * Math.pow(mult, currentMartingaleStep - 1)).toFixed(2);
 }
+
 function requestTrade(signalType) {
   if (currentState !== STATE.IDLE || !ws || ws.readyState !== WebSocket.OPEN) return;
   currentState = STATE.PRICING; enableTradeButtons(false);
   let contractType = null, barrier = null;
 
+  // 🚨 RISE/FALL: READ DROPDOWN DIRECTLY (Ignore signalType variable)
   if (autoModeSelect.value === "risefall" && isAutoTrading) {
-    if (signalType === "rise") contractType = "PUT"; // Rise = PUT
-    else if (signalType === "fall") contractType = "CALL"; // Fall = CALL
+    const userChoice = autoSignalSelect.value;
+    if (userChoice === "rise") contractType = "PUT";   // Rise = PUT
+    else if (userChoice === "fall") contractType = "CALL"; // Fall = CALL
     else { currentState = STATE.IDLE; return; }
-  } else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
+  } 
+  else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
     else if (signalType === "odd") { contractType = "DIGITODD"; }
-  } else {
+  } 
+  else {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
@@ -349,10 +345,11 @@ function requestTrade(signalType) {
 
   const stake = getStake();
   const req = { proposal: 1, amount: stake, basis: "stake", contract_type: contractType, currency: activeAccount.currency, duration: 1, duration_unit: "t", underlying_symbol: currentMarket, req_id: reqId++ };
-  if (barrier !== null) req.barrier = String(barrier);
+  if (barrier !== null && contractType.includes("DIGIT")) req.barrier = String(barrier);
   ws.send(JSON.stringify(req));
   tradeHint.textContent = `Requesting ${contractType} @ $${stake}...`;
 }
+
 function handleProposal(proposal) {
   if (currentState !== STATE.PRICING) return;
   currentState = STATE.BUYING;
@@ -391,12 +388,10 @@ function handleContractUpdate(contract) {
     enableTradeButtons(true); return;
   }
 
-  // 🚨 FIXED: EXPLICITLY RE-TRIGGER FOR FIXED/DYNAMIC MODES
   if (isAutoTrading) {
     if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
       requestTrade(autoSignalSelect.value);
     }
-    // Rise/Fall mode is triggered by the next tick's handleTick
     tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Continuing...`;
   } else {
     enableTradeButtons(true); tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
@@ -433,7 +428,7 @@ resetHistoryBtn.addEventListener("click", () => {
 marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
-  recentDigits = []; // Reset scanner
+  recentDigits = [];
   subscribeTicks();
 });
 logoutBtn.addEventListener("click", () => {
