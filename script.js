@@ -1,6 +1,8 @@
 // ============================================
-//  AUTO TRADER PRO — v18.0 (Rise/Fall Hardcoded Fix)
-//  Rise = PUT, Fall = CALL (Deriv official docs)
+//  AUTO TRADER PRO — v19.0 (Barrier Recovery)
+//  Added: Auto OVER w/ Recovery, Auto UNDER w/ Recovery
+//  Logic: On loss, shift barrier to safe zone (Over 4 / Under 5)
+//         On recovery win, return to original barrier
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -28,6 +30,11 @@ let recentDigits = [];
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
 let baseStake = 0.35;
+
+// 🚨 RECOVERY STATE
+let isRecoveryMode = false;
+let originalBarrier = 5;
+let recoveryType = null; // "over" or "under"
 
 let totalWins = 0, totalLosses = 0, totalPL = 0;
 
@@ -64,6 +71,11 @@ const stopAutoBtn = $("stopAutoBtn");
 const autoSignalSelect = $("autoSignalSelect");
 const autoModeSelect = $("autoModeSelect");
 
+// Recovery buttons
+const autoOverRecoveryBtn = $("autoOverRecoveryBtn");
+const autoUnderRecoveryBtn = $("autoUnderRecoveryBtn");
+
+// Signal panel
 const signalStatus = $("signalStatus");
 const jumpDistanceEl = $("jumpDistance");
 const recentDigitsEl = $("recentDigits");
@@ -118,7 +130,7 @@ function addResult(type, profit, entryPrice, exitPrice) {
     <span class="result-detail">
       <span class="price-entry">In: ${entryPrice || "—"}</span>
       <span class="price-exit">Out: ${exitPrice || "—"}</span>
-      <span class="result-message">${profit > 0 ? "WIN" : "LOSS"}</span>
+      <span class="result-message">${profit > 0 ? "WIN" : "LOSS"} ${isRecoveryMode ? "(RECOVERY)" : ""}</span>
     </span>
     <span class="result-pl ${plClass}">${plText}</span>
   `;
@@ -321,19 +333,30 @@ function requestTrade(signalType) {
   currentState = STATE.PRICING; enableTradeButtons(false);
   let contractType = null, barrier = null;
 
-  // 🚨 RISE/FALL: READ DROPDOWN DIRECTLY (Ignore signalType variable)
-  if (autoModeSelect.value === "risefall" && isAutoTrading) {
+  // 🚨 RECOVERY MODE LOGIC
+  if (isRecoveryMode) {
+    if (recoveryType === "over") {
+      contractType = "DIGITOVER";
+      barrier = 4; // Safe barrier for OVER recovery
+    } else if (recoveryType === "under") {
+      contractType = "DIGITUNDER";
+      barrier = 5; // Safe barrier for UNDER recovery
+    }
+    tradeHint.textContent = `🔄 Recovery: ${contractType} ${barrier} @ $${getStake()}`;
+  }
+  // 🚨 NORMAL MODE LOGIC
+  else if (autoModeSelect.value === "risefall" && isAutoTrading) {
     const userChoice = autoSignalSelect.value;
-    if (userChoice === "rise") contractType = "PUT";   // Rise = PUT
-    else if (userChoice === "fall") contractType = "CALL"; // Fall = CALL
+    if (userChoice === "rise") contractType = "PUT";
+    else if (userChoice === "fall") contractType = "CALL";
     else { currentState = STATE.IDLE; return; }
-  } 
+  }
   else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
     else if (signalType === "odd") { contractType = "DIGITODD"; }
-  } 
+  }
   else {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
@@ -375,26 +398,50 @@ function handleContractUpdate(contract) {
 
   currentState = STATE.IDLE; currentContractId = null;
 
-  if (profit > 0) currentMartingaleStep = 1;
-  else {
-    const maxSteps = parseInt(maxStepsInput.value, 10);
-    if (currentMartingaleStep < maxSteps) currentMartingaleStep++;
-    else currentMartingaleStep = 1;
+  // 🚨 RECOVERY LOGIC
+  if (isRecoveryMode) {
+    if (profit > 0) {
+      // Recovery successful: return to normal mode
+      isRecoveryMode = false;
+      recoveryType = null;
+      selectedBarrier = originalBarrier;
+      currentMartingaleStep = 1;
+      tradeHint.textContent = `✅ Recovery successful. Back to barrier ${originalBarrier}.`;
+    } else {
+      // Recovery failed: increase stake and retry recovery
+      currentMartingaleStep++;
+      tradeHint.textContent = `🔄 Recovery lost. Retrying...`;
+    }
+  } else {
+    // Normal mode
+    if (profit > 0) {
+      currentMartingaleStep = 1;
+    } else {
+      // LOSS: Enter recovery mode
+      isRecoveryMode = true;
+      recoveryType = (autoSignalSelect.value === "over" || autoSignalSelect.value === "under") ? autoSignalSelect.value : "over";
+      currentMartingaleStep++;
+      tradeHint.textContent = `🔄 Loss detected. Switching to recovery barrier (${recoveryType === "over" ? "Over 4" : "Under 5"})...`;
+    }
   }
 
+  // TP/SL Check
   const tp = parseFloat(tpInput.value); const sl = parseFloat(slInput.value);
   if (totalPL >= tp || totalPL <= -sl) {
     stopAutoTrade(); tradeHint.textContent = totalPL >= tp ? "🎯 TP Hit!" : "🛑 SL Hit!";
     enableTradeButtons(true); return;
   }
 
+  // CONTINUE TRADING
   if (isAutoTrading) {
-    if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
+    if (isRecoveryMode) {
+      requestTrade(null); // Recovery trade
+    } else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
       requestTrade(autoSignalSelect.value);
     }
-    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Continuing...`;
   } else {
-    enableTradeButtons(true); tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
+    enableTradeButtons(true);
+    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
   }
 }
 
@@ -402,10 +449,49 @@ function handleContractUpdate(contract) {
 tradeBtns.forEach((btn) => { btn.addEventListener("click", () => { if (isAutoTrading) return; requestTrade(btn.dataset.type); }); });
 function enableTradeButtons(enabled) { tradeBtns.forEach((btn) => (btn.disabled = !enabled)); }
 
+// 🚨 RECOVERY BUTTON HANDLERS
+autoOverRecoveryBtn.addEventListener("click", () => {
+  if (currentState !== STATE.IDLE) return;
+  isAutoTrading = true;
+  isRecoveryMode = false;
+  originalBarrier = selectedBarrier;
+  recoveryType = "over";
+  baseStake = parseFloat(stakeInput.value);
+  currentMartingaleStep = 1;
+  startAutoBtn.disabled = true;
+  stopAutoBtn.disabled = false;
+  autoOverRecoveryBtn.classList.add("active");
+  autoUnderRecoveryBtn.classList.remove("active");
+  enableTradeButtons(false);
+  tradeHint.textContent = `🔄 Auto OVER w/ Recovery active (barrier ${originalBarrier})...`;
+  requestTrade("over");
+});
+
+autoUnderRecoveryBtn.addEventListener("click", () => {
+  if (currentState !== STATE.IDLE) return;
+  isAutoTrading = true;
+  isRecoveryMode = false;
+  originalBarrier = selectedBarrier;
+  recoveryType = "under";
+  baseStake = parseFloat(stakeInput.value);
+  currentMartingaleStep = 1;
+  startAutoBtn.disabled = true;
+  stopAutoBtn.disabled = false;
+  autoUnderRecoveryBtn.classList.add("active");
+  autoOverRecoveryBtn.classList.remove("active");
+  enableTradeButtons(false);
+  tradeHint.textContent = `🔄 Auto UNDER w/ Recovery active (barrier ${originalBarrier})...`;
+  requestTrade("under");
+});
+
 startAutoBtn.addEventListener("click", () => {
   if (currentState !== STATE.IDLE) return;
-  isAutoTrading = true; startAutoBtn.disabled = true; stopAutoBtn.disabled = false;
+  isAutoTrading = true;
+  isRecoveryMode = false;
+  startAutoBtn.disabled = true; stopAutoBtn.disabled = false;
   enableTradeButtons(false); currentMartingaleStep = 1; baseStake = parseFloat(stakeInput.value);
+  autoOverRecoveryBtn.classList.remove("active");
+  autoUnderRecoveryBtn.classList.remove("active");
 
   if (autoModeSelect.value === "risefall") {
     tradeHint.textContent = `🤖 Rise/Fall Active...`;
@@ -416,7 +502,10 @@ startAutoBtn.addEventListener("click", () => {
   }
 });
 function stopAutoTrade() {
-  isAutoTrading = false; startAutoBtn.disabled = false; stopAutoBtn.disabled = true;
+  isAutoTrading = false; isRecoveryMode = false;
+  startAutoBtn.disabled = false; stopAutoBtn.disabled = true;
+  autoOverRecoveryBtn.classList.remove("active");
+  autoUnderRecoveryBtn.classList.remove("active");
   enableTradeButtons(true); tradeHint.textContent = "Auto Stopped.";
 }
 stopAutoBtn.addEventListener("click", stopAutoTrade);

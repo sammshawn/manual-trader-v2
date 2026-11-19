@@ -32,7 +32,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: radial-gradient(
 .login-card h1 { font-size: 1.5rem; font-weight: 800; margin-bottom: 0.5rem; }
 .login-card p { color: var(--muted); margin-bottom: 2rem; }
 
-/* MAIN LAYOUT (Tool + Signal Panel) */
+/* MAIN LAYOUT */
 .main-layout { display: grid; grid-template-columns: 1fr 320px; gap: 1.5rem; align-items: start; }
 .main-tool { display: flex; flex-direction: column; gap: 1.5rem; }
 
@@ -68,6 +68,15 @@ body { font-family: 'Inter', system-ui, sans-serif; background: radial-gradient(
 .btn-trade.even { background: rgba(34, 211, 238, 0.15); color: var(--cyan); border-color: rgba(34, 211, 238, 0.4); }
 .btn-trade.odd { background: rgba(251, 191, 36, 0.15); color: var(--amber); border-color: rgba(251, 191, 36, 0.4); }
 
+/* 🚨 RECOVERY BUTTONS */
+.recovery-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-bottom: 1rem; }
+.btn-recovery { padding: 0.8rem; border-radius: 10px; font-weight: 800; font-size: 0.85rem; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+.btn-recovery.over { background: rgba(16, 185, 129, 0.1); color: var(--green); border-color: rgba(16, 185, 129, 0.3); }
+.btn-recovery.over:hover { background: rgba(16, 185, 129, 0.2); }
+.btn-recovery.under { background: rgba(239, 68, 68, 0.1); color: var(--red); border-color: rgba(239, 68, 68, 0.3); }
+.btn-recovery.under:hover { background: rgba(239, 68, 68, 0.2); }
+.btn-recovery.active { background: var(--blue); color: white; border-color: var(--blue); }
+
 .auto-trade-box { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
 .auto-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; font-weight: 800; font-size: 0.9rem; color: var(--cyan); }
 .auto-mode-select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.5rem; font-size: 0.75rem; font-weight: 700; outline: none; }
@@ -102,7 +111,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: radial-gradient(
 .result-pl { font-family: 'JetBrains Mono', monospace; font-weight: 800; text-align: right; font-size: 1rem; }
 .result-pl.positive { color: var(--green); } .result-pl.negative { color: var(--red); }
 
-/* 🚨 SIGNAL PANEL (RIGHT SIDE) */
+/* SIGNAL PANEL */
 .signal-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 1.5rem; position: sticky; top: 100px; }
 .signal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem; }
 .signal-header h2 { font-size: 1rem; font-weight: 800; color: var(--cyan); }
@@ -128,6 +137,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: radial-gradient(
 @media (max-width: 600px) {
   .digit-circle { width: 46px; height: 46px; font-size: 1rem; }
   .trade-buttons { grid-template-columns: 1fr 1fr; }
+  .recovery-buttons { grid-template-columns: 1fr; }
   .topbar-inner { padding: 0.8rem 1rem; }
   .auto-controls { flex-direction: column; }
 }

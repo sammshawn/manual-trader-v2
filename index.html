@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=17.0" />
+  <link rel="stylesheet" href="style.css?v=19.0" />
 </head>
 <body>
 
@@ -41,11 +41,7 @@
     </section>
 
     <section class="trading-screen" id="tradingScreen" style="display:none;">
-      
-      <!-- NEW LAYOUT: Main Tool + Signal Panel -->
       <div class="main-layout">
-        
-        <!-- LEFT: MAIN TRADING TOOL -->
         <div class="main-tool">
           <div class="control-bar">
             <label class="market-select">
@@ -102,7 +98,13 @@
               <button class="btn-trade odd" data-type="odd">ODD</button>
             </div>
 
-            <div class="auto-trade-box">
+            <!-- 🚨 NEW RECOVERY BUTTONS -->
+            <div class="recovery-buttons">
+              <button class="btn-recovery over" id="autoOverRecoveryBtn">Auto OVER w/ Recovery</button>
+              <button class="btn-recovery under" id="autoUnderRecoveryBtn">Auto UNDER w/ Recovery</button>
+            </div>
+
+            <div class="auto-trade-box" style="margin-top: 1rem;">
               <div class="auto-header">
                 <span>Auto-Trade Engine</span>
                 <select id="autoModeSelect" class="auto-mode-select">
@@ -117,8 +119,8 @@
                   <option value="under">Auto UNDER</option>
                   <option value="even">Auto EVEN</option>
                   <option value="odd">Auto ODD</option>
-                  <option value="rise">Auto RISE</option>
-                  <option value="fall">Auto FALL</option>
+                  <option value="rise">Auto FALL</option>
+                  <option value="fall">Auto RISE</option>
                 </select>
                 <button class="btn-auto-start" id="startAutoBtn">▶ Start Auto</button>
                 <button class="btn-auto-stop" id="stopAutoBtn" disabled>■ Stop</button>
@@ -146,7 +148,6 @@
           </div>
         </div>
 
-        <!-- RIGHT: SIGNAL SCANNER PANEL -->
         <div class="signal-panel">
           <div class="signal-header">
             <h2>📡 Jump Scanner</h2>
@@ -171,12 +172,11 @@
             </div>
           </div>
         </div>
-
       </div>
     </section>
   </main>
 
   <footer class="footer"><p>Auto Trader Pro · Trade at your own risk</p></footer>
-  <script src="script.js?v=17.0"></script>
+  <script src="script.js?v=19.0"></script>
 </body>
 </html>
