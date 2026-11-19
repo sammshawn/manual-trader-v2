@@ -1,6 +1,5 @@
 // ============================================
-//  AUTO TRADER PRO — v16.0 (Rise/Fall Corrected)
-//  Rise = PUT, Fall = CALL. No barrier for Rise/Fall.
+//  AUTO TRADER PRO — v17.0 (Jump Scanner + Loop Fix)
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -23,6 +22,7 @@ let currentMarket = "R_100";
 let selectedBarrier = 5;
 let lastDigit = null;
 let currentContractId = null;
+let recentDigits = []; // For Jump Scanner
 
 let isAutoTrading = false;
 let currentMartingaleStep = 1;
@@ -46,6 +46,7 @@ const stakeInput = $("stakeInput");
 const tpInput = $("tpInput");
 const slInput = $("slInput");
 const martingaleMult = $("martingaleMult");
+const maxStepsInput = $("maxStepsInput");
 const resultsLog = $("resultsLog");
 const resultsCount = $("resultsCount");
 const tradeHint = $("tradeHint");
@@ -62,25 +63,16 @@ const stopAutoBtn = $("stopAutoBtn");
 const autoSignalSelect = $("autoSignalSelect");
 const autoModeSelect = $("autoModeSelect");
 
+// Signal Panel DOM
+const signalStatus = $("signalStatus");
+const jumpDistanceEl = $("jumpDistance");
+const recentDigitsEl = $("recentDigits");
+const signalBox = $("signalBox");
+const signalIcon = $("signalIcon");
+const signalText = $("signalText");
+
 const DECIMALS_MAP = { R_10: 3, R_25: 3, R_50: 4, R_75: 4, R_100: 2, "1HZ10V": 2, "1HZ25V": 2, "1HZ50V": 2, "1HZ75V": 2, "1HZ100V": 2 };
 let resultCount = 0;
-
-// ---- ADD RISE/FALL OPTIONS DYNAMICALLY ----
-const modeSelect = document.getElementById("autoModeSelect");
-const riseFallMode = document.createElement("option");
-riseFallMode.value = "risefall";
-riseFallMode.text = "Rise / Fall";
-modeSelect.appendChild(riseFallMode);
-
-const signalSelect = document.getElementById("autoSignalSelect");
-const riseSignal = document.createElement("option");
-riseSignal.value = "rise";
-riseSignal.text = "Auto RISE";
-signalSelect.appendChild(riseSignal);
-const fallSignal = document.createElement("option");
-fallSignal.value = "fall";
-fallSignal.text = "Auto FALL";
-signalSelect.appendChild(fallSignal);
 
 // ---- UI BUILDERS ----
 function buildCircles() {
@@ -148,19 +140,16 @@ function generatePKCE() {
   sessionStorage.setItem("oauth_state", state);
   return { codeVerifier, state };
 }
-
 async function generateCodeChallenge(verifier) {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-
 async function startLogin() {
   const { codeVerifier, state } = generatePKCE();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const params = new URLSearchParams({ response_type: "code", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI, scope: "trade", state: state, code_challenge: codeChallenge, code_challenge_method: "S256" });
   window.location.href = `${AUTH_URL}?${params.toString()}`;
 }
-
 async function handleCallback() {
   const urlParams = new URLSearchParams(window.location.search);
   const code = urlParams.get("code");
@@ -202,7 +191,6 @@ async function fetchAccounts() {
     return true;
   } catch (err) { return false; }
 }
-
 async function selectAccount(acc) {
   if (currentState !== STATE.IDLE) return;
   activeAccount = { id: acc.account_id, type: acc.type || acc.account_type, currency: acc.currency || "USD" };
@@ -210,13 +198,9 @@ async function selectAccount(acc) {
   pillReal.classList.toggle("active", activeAccount.type === "real");
   accId.textContent = activeAccount.id;
   accountInfo.style.display = "flex";
-  if (ws) {
-    clearInterval(pingInterval);
-    ws.close();
-  }
+  if (ws) { clearInterval(pingInterval); ws.close(); }
   await connectWS();
 }
-
 async function connectWS() {
   try {
     const res = await fetch(`${API_BASE}/accounts/${activeAccount.id}/otp`, {
@@ -237,9 +221,7 @@ async function connectWS() {
       currentState = STATE.IDLE;
 
       clearInterval(pingInterval);
-      pingInterval = setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
-      }, 25000);
+      pingInterval = setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 })); }, 25000);
     };
 
     ws.onmessage = (event) => {
@@ -247,9 +229,7 @@ async function connectWS() {
       if (msg.error) {
         console.warn("Deriv error:", msg.error.message);
         if (msg.echo_req && (msg.echo_req.buy || msg.echo_req.proposal)) {
-          currentState = STATE.IDLE;
-          enableTradeButtons(true);
-          tradeHint.textContent = "Error: " + msg.error.message;
+          currentState = STATE.IDLE; enableTradeButtons(true); tradeHint.textContent = "Error: " + msg.error.message;
         }
         return;
       }
@@ -263,27 +243,21 @@ async function connectWS() {
     ws.onclose = () => {
       clearInterval(pingInterval);
       if (accessToken && activeAccount && reconnectAttempts < 3) {
-        reconnectAttempts++;
-        tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
+        reconnectAttempts++; tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
         setTimeout(connectWS, 2000);
       } else {
-        tradeHint.textContent = "Disconnected. Please refresh.";
-        currentState = STATE.IDLE;
-        enableTradeButtons(true);
+        tradeHint.textContent = "Disconnected."; currentState = STATE.IDLE; enableTradeButtons(true);
       }
     };
   } catch (err) { console.warn("Connection failed:", err); }
 }
-
 function subscribeTicks() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ forget_all: "ticks", req_id: reqId++ }));
-  setTimeout(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ }));
-  }, 100);
+  setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ })); }, 100);
 }
 
-// ---- TICK HANDLER ----
+// ---- TICK HANDLER & JUMP SCANNER ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
@@ -291,14 +265,57 @@ function handleTick(tick) {
   lastDigit = parseInt(priceStr.slice(-1), 10);
   lastPriceEl.textContent = priceStr;
 
+  // Update Circles
   document.querySelectorAll(".digit-circle").forEach((c) => c.classList.remove("active"));
   const activeCircle = document.querySelector(`.digit-circle[data-digit="${lastDigit}"]`);
   if (activeCircle) activeCircle.classList.add("active");
 
-  // 🚨 RISE/FALL CONTINUOUS TRADING
-  if (autoModeSelect.value === "risefall" && isAutoTrading && currentState === STATE.IDLE) {
-    const signal = autoSignalSelect.value === "rise" ? "rise" : "fall";
-    requestTrade(signal);
+  // 🚨 JUMP SCANNER LOGIC
+  recentDigits.push(lastDigit);
+  if (recentDigits.length > 6) recentDigits.shift();
+  updateSignalScanner();
+
+  // 🚨 CONTINUOUS TRADING TRIGGER
+  if (isAutoTrading && currentState === STATE.IDLE) {
+    if (autoModeSelect.value === "risefall") {
+      requestTrade(autoSignalSelect.value);
+    }
+  }
+}
+
+// 🚨 THE JUMP SCANNER
+function updateSignalScanner() {
+  if (recentDigits.length < 6) {
+    signalText.textContent = `Collecting ticks (${recentDigits.length}/6)...`;
+    return;
+  }
+
+  // Calculate Jump Distances
+  let totalDistance = 0;
+  for (let i = 1; i < recentDigits.length; i++) {
+    totalDistance += Math.abs(recentDigits[i] - recentDigits[i-1]);
+  }
+  const avgDistance = totalDistance / (recentDigits.length - 1);
+  jumpDistanceEl.textContent = avgDistance.toFixed(1);
+
+  // Display Recent Digits
+  recentDigitsEl.innerHTML = recentDigits.map(d => `<span class="recent-digit">${d}</span>`).join("");
+
+  // Determine Signal
+  // Small jumps (avg < 2.5) = Smooth = Fall (PUT)
+  // Large jumps (avg >= 2.5) = Jumpy = Rise (CALL)
+  if (avgDistance < 2.5) {
+    signalBox.className = "signal-box fall";
+    signalIcon.textContent = "📉";
+    signalText.textContent = "FALL MARKET";
+    signalStatus.textContent = "Smooth";
+    signalStatus.style.color = "var(--red)";
+  } else {
+    signalBox.className = "signal-box rise";
+    signalIcon.textContent = "📈";
+    signalText.textContent = "RISE MARKET";
+    signalStatus.textContent = "Jumpy";
+    signalStatus.style.color = "var(--green)";
   }
 }
 
@@ -307,65 +324,45 @@ function getStake() {
   const mult = parseFloat(martingaleMult.value) || 1;
   return (baseStake * Math.pow(mult, currentMartingaleStep - 1)).toFixed(2);
 }
-
 function requestTrade(signalType) {
   if (currentState !== STATE.IDLE || !ws || ws.readyState !== WebSocket.OPEN) return;
+  currentState = STATE.PRICING; enableTradeButtons(false);
+  let contractType = null, barrier = null;
 
-  currentState = STATE.PRICING;
-  enableTradeButtons(false);
-
-  let contractType = null;
-  let barrier = null;
-
-  // 🚨 RISE/FALL MODE (Corrected: Rise = PUT, Fall = CALL per Deriv docs)
   if (autoModeSelect.value === "risefall" && isAutoTrading) {
-    if (signalType === "rise") contractType = "PUT";   // Rise uses PUT [citation:1]
-    else if (signalType === "fall") contractType = "CALL"; // Fall uses CALL [citation:1]
+    if (signalType === "rise") contractType = "PUT"; // Rise = PUT
+    else if (signalType === "fall") contractType = "CALL"; // Fall = CALL
     else { currentState = STATE.IDLE; return; }
-    // NO BARRIER for Rise/Fall
-  }
-  else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
+  } else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
     else if (signalType === "odd") { contractType = "DIGITODD"; }
-  }
-  else {
+  } else {
     if (signalType === "over") { contractType = "DIGITOVER"; barrier = selectedBarrier; }
     else if (signalType === "under") { contractType = "DIGITUNDER"; barrier = selectedBarrier; }
     else if (signalType === "even") { contractType = "DIGITEVEN"; }
     else if (signalType === "odd") { contractType = "DIGITODD"; }
+    else if (signalType === "rise") { contractType = "PUT"; }
+    else if (signalType === "fall") { contractType = "CALL"; }
   }
 
   const stake = getStake();
-  const req = {
-    proposal: 1, amount: stake, basis: "stake", contract_type: contractType,
-    currency: activeAccount.currency, duration: 1, duration_unit: "t",
-    underlying_symbol: currentMarket, req_id: reqId++,
-  };
-  
-  // Only add barrier for digit contracts
-  if (barrier !== null && contractType.includes("DIGIT")) {
-    req.barrier = String(barrier);
-  }
-
+  const req = { proposal: 1, amount: stake, basis: "stake", contract_type: contractType, currency: activeAccount.currency, duration: 1, duration_unit: "t", underlying_symbol: currentMarket, req_id: reqId++ };
+  if (barrier !== null) req.barrier = String(barrier);
   ws.send(JSON.stringify(req));
   tradeHint.textContent = `Requesting ${contractType} @ $${stake}...`;
 }
-
 function handleProposal(proposal) {
   if (currentState !== STATE.PRICING) return;
   currentState = STATE.BUYING;
   ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, req_id: reqId++ }));
 }
-
 function handleBuy(buy) {
   if (currentState !== STATE.BUYING) return;
-  currentContractId = buy.contract_id;
-  currentState = STATE.MONITORING;
+  currentContractId = buy.contract_id; currentState = STATE.MONITORING;
   ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: currentContractId, subscribe: 1, req_id: reqId++ }));
 }
-
 function handleContractUpdate(contract) {
   if (currentState !== STATE.MONITORING) return;
   if (contract.contract_id !== currentContractId) return;
@@ -379,89 +376,66 @@ function handleContractUpdate(contract) {
   addResult(profit > 0 ? "win" : "loss", profit, entrySpot, exitSpot);
   ws.send(JSON.stringify({ forget: contract.id, req_id: reqId++ }));
 
-  currentState = STATE.IDLE;
-  currentContractId = null;
+  currentState = STATE.IDLE; currentContractId = null;
 
-  // Martingale
-  if (profit > 0) {
-    currentMartingaleStep = 1;
-  } else {
-    currentMartingaleStep++;
+  if (profit > 0) currentMartingaleStep = 1;
+  else {
+    const maxSteps = parseInt(maxStepsInput.value, 10);
+    if (currentMartingaleStep < maxSteps) currentMartingaleStep++;
+    else currentMartingaleStep = 1;
   }
 
-  // TP/SL Check
-  const tp = parseFloat(tpInput.value);
-  const sl = parseFloat(slInput.value);
+  const tp = parseFloat(tpInput.value); const sl = parseFloat(slInput.value);
   if (totalPL >= tp || totalPL <= -sl) {
-    stopAutoTrade();
-    tradeHint.textContent = totalPL >= tp ? "🎯 TP Hit!" : "🛑 SL Hit!";
-    enableTradeButtons(true);
-    return;
+    stopAutoTrade(); tradeHint.textContent = totalPL >= tp ? "🎯 TP Hit!" : "🛑 SL Hit!";
+    enableTradeButtons(true); return;
   }
 
+  // 🚨 FIXED: EXPLICITLY RE-TRIGGER FOR FIXED/DYNAMIC MODES
   if (isAutoTrading) {
-    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready for next...`;
+    if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
+      requestTrade(autoSignalSelect.value);
+    }
+    // Rise/Fall mode is triggered by the next tick's handleTick
+    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Continuing...`;
   } else {
-    enableTradeButtons(true);
-    tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
+    enableTradeButtons(true); tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
   }
 }
 
 // ---- CONTROLS ----
-tradeBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    if (isAutoTrading) return;
-    requestTrade(btn.dataset.type);
-  });
-});
-
-function enableTradeButtons(enabled) {
-  tradeBtns.forEach((btn) => (btn.disabled = !enabled));
-}
+tradeBtns.forEach((btn) => { btn.addEventListener("click", () => { if (isAutoTrading) return; requestTrade(btn.dataset.type); }); });
+function enableTradeButtons(enabled) { tradeBtns.forEach((btn) => (btn.disabled = !enabled)); }
 
 startAutoBtn.addEventListener("click", () => {
   if (currentState !== STATE.IDLE) return;
-  isAutoTrading = true;
-  startAutoBtn.disabled = true;
-  stopAutoBtn.disabled = false;
-  enableTradeButtons(false);
-  currentMartingaleStep = 1;
-  baseStake = parseFloat(stakeInput.value);
+  isAutoTrading = true; startAutoBtn.disabled = true; stopAutoBtn.disabled = false;
+  enableTradeButtons(false); currentMartingaleStep = 1; baseStake = parseFloat(stakeInput.value);
 
-  const mode = autoModeSelect.value;
-  if (mode === "risefall") {
-    tradeHint.textContent = `🤖 Rise/Fall Active (${autoSignalSelect.value.toUpperCase()})...`;
+  if (autoModeSelect.value === "risefall") {
+    tradeHint.textContent = `🤖 Rise/Fall Active...`;
     requestTrade(autoSignalSelect.value);
-  } else if (mode === "wave") {
-    tradeHint.textContent = `🤖 Wave Dominance Active...`;
   } else {
-    tradeHint.textContent = `🤖 Auto Active (${mode})...`;
+    tradeHint.textContent = `🤖 Auto Active (${autoModeSelect.value})...`;
     requestTrade(autoSignalSelect.value);
   }
 });
-
 function stopAutoTrade() {
-  isAutoTrading = false;
-  startAutoBtn.disabled = false;
-  stopAutoBtn.disabled = true;
-  enableTradeButtons(true);
-  tradeHint.textContent = "Auto Stopped.";
+  isAutoTrading = false; startAutoBtn.disabled = false; stopAutoBtn.disabled = true;
+  enableTradeButtons(true); tradeHint.textContent = "Auto Stopped.";
 }
 stopAutoBtn.addEventListener("click", stopAutoTrade);
-
 resetHistoryBtn.addEventListener("click", () => {
   resultsLog.innerHTML = '<p class="empty-log">No trades yet. Place your first trade above.</p>';
   resultCount = 0; totalWins = 0; totalLosses = 0; totalPL = 0;
-  resultsCount.textContent = "0";
-  updateDashboardStats();
+  resultsCount.textContent = "0"; updateDashboardStats();
 });
-
 marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
+  recentDigits = []; // Reset scanner
   subscribeTicks();
 });
-
 logoutBtn.addEventListener("click", () => {
   sessionStorage.removeItem("deriv_access_token");
   if (pingInterval) clearInterval(pingInterval);

@@ -8,23 +8,17 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=4.0" />
+  <link rel="stylesheet" href="style.css?v=17.0" />
 </head>
 <body>
 
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand">
-        <span class="brand-mark">🤖</span>
-        Auto Trader Pro
-      </div>
-      
-      <!-- ACCOUNT SWITCHER -->
+      <div class="brand"><span class="brand-mark">🤖</span> Auto Trader Pro</div>
       <div class="account-switcher" id="accountSwitcher" style="display:none;">
         <div class="acc-pill demo active" id="pillDemo">🇺🇸 Demo</div>
         <div class="acc-pill real" id="pillReal">🇺🇸 Real</div>
       </div>
-
       <div class="auth-area" id="authArea">
         <button class="btn-login" id="loginBtn">Login with Deriv</button>
         <div class="account-info" id="accountInfo" style="display:none;">
@@ -37,8 +31,6 @@
   </header>
 
   <main class="container">
-
-    <!-- LOGIN SCREEN -->
     <section class="login-screen" id="loginScreen">
       <div class="login-card">
         <div class="login-icon">🔐</div>
@@ -48,138 +40,143 @@
       </div>
     </section>
 
-    <!-- TRADING SCREEN -->
     <section class="trading-screen" id="tradingScreen" style="display:none;">
-
-      <!-- MARKET SELECTOR -->
-      <div class="control-bar">
-        <label class="market-select">
-          <span>Market</span>
-          <select id="marketSelect">
-            <option value="R_10">Volatility 10</option>
-            <option value="R_25">Volatility 25</option>
-            <option value="R_50">Volatility 50</option>
-            <option value="R_75">Volatility 75</option>
-            <option value="R_100" selected>Volatility 100</option>
-            <option value="1HZ10V">Volatility 10 (1s)</option>
-            <option value="1HZ25V">Volatility 25 (1s)</option>
-            <option value="1HZ50V">Volatility 50 (1s)</option>
-            <option value="1HZ75V">Volatility 75 (1s)</option>
-            <option value="1HZ100V">Volatility 100 (1s)</option>
-          </select>
-        </label>
-        <div class="last-price-display">
-          <span class="last-price-label">Last Price</span>
-          <span class="last-price" id="lastPrice">—</span>
-        </div>
-      </div>
-
-      <!-- DIGIT CIRCLES -->
-      <div class="digit-circles-wrap">
-        <div class="digit-circles" id="digitCircles">
-          <!-- Injected by JS -->
-        </div>
-      </div>
-
-      <!-- MANUAL & AUTO TRADE PANEL -->
-      <div class="trade-panel">
-        <div class="stake-row">
-          <label>Base Stake (USD)</label>
-          <input type="number" id="stakeInput" value="0.35" min="0.35" step="0.01" />
-          
-          <label style="margin-left: 1rem;">TP ($)</label>
-          <input type="number" id="tpInput" value="5.00" min="0.1" step="0.5" style="width: 80px;" />
-          
-          <label style="margin-left: 1rem;">SL ($)</label>
-          <input type="number" id="slInput" value="5.00" min="0.1" step="0.5" style="width: 80px;" />
-        </div>
-
-        <div class="stake-row" style="margin-top: -0.5rem; margin-bottom: 1.5rem;">
-          <label>Martingale</label>
-          <select id="martingaleMult" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 0.5rem; border-radius: 8px;">
-            <option value="1">Off</option>
-            <option value="1.5">1.5x</option>
-            <option value="2" selected>2.0x</option>
-            <option value="3">3.0x</option>
-          </select>
-          
-          <label style="margin-left: 1rem;">Max Steps</label>
-          <input type="number" id="maxStepsInput" value="3" min="1" max="10" style="width: 70px;" />
-        </div>
-
-        <!-- MANUAL BUTTONS -->
-        <p style="font-size: 0.75rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.5rem;">Manual Trade</p>
-        <div class="trade-buttons">
-          <button class="btn-trade over" data-type="over">OVER</button>
-          <button class="btn-trade under" data-type="under">UNDER</button>
-          <button class="btn-trade even" data-type="even">EVEN</button>
-          <button class="btn-trade odd" data-type="odd">ODD</button>
-        </div>
-
-        <!-- AUTO TRADE CONTROLS -->
-        <div class="auto-trade-box">
-          <div class="auto-header">
-            <span>Auto-Trade Engine</span>
-            <select id="autoModeSelect" class="auto-mode-select">
-              <option value="fixed">Fixed Signal</option>
-              <option value="dynamic">Dynamic Cursor</option>
-            </select>
-          </div>
-          
-          <div class="auto-controls">
-            <select id="autoSignalSelect">
-              <option value="over">Auto OVER</option>
-              <option value="under">Auto UNDER</option>
-              <option value="even">Auto EVEN</option>
-              <option value="odd">Auto ODD</option>
-            </select>
-            <button class="btn-auto-start" id="startAutoBtn">▶ Start Auto</button>
-            <button class="btn-auto-stop" id="stopAutoBtn" disabled>■ Stop</button>
-          </div>
-          <p class="trade-hint" id="tradeHint">Select a barrier and click a trade button to start.</p>
-        </div>
-      </div>
-
-      <!-- RESULTS DASHBOARD -->
-      <div class="results-panel">
+      
+      <!-- NEW LAYOUT: Main Tool + Signal Panel -->
+      <div class="main-layout">
         
-        <!-- DASHBOARD STATS -->
-        <div class="stats-bar">
-          <div class="stat-item">
-            <span class="stat-label">Wins</span>
-            <span class="stat-value win" id="statWins">0</span>
+        <!-- LEFT: MAIN TRADING TOOL -->
+        <div class="main-tool">
+          <div class="control-bar">
+            <label class="market-select">
+              <span>Market</span>
+              <select id="marketSelect">
+                <option value="R_10">Volatility 10</option>
+                <option value="R_25">Volatility 25</option>
+                <option value="R_50">Volatility 50</option>
+                <option value="R_75">Volatility 75</option>
+                <option value="R_100" selected>Volatility 100</option>
+                <option value="1HZ10V">Volatility 10 (1s)</option>
+                <option value="1HZ25V">Volatility 25 (1s)</option>
+                <option value="1HZ50V">Volatility 50 (1s)</option>
+                <option value="1HZ75V">Volatility 75 (1s)</option>
+                <option value="1HZ100V">Volatility 100 (1s)</option>
+              </select>
+            </label>
+            <div class="last-price-display">
+              <span class="last-price-label">Last Price</span>
+              <span class="last-price" id="lastPrice">—</span>
+            </div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">Losses</span>
-            <span class="stat-value loss" id="statLosses">0</span>
+
+          <div class="digit-circles-wrap">
+            <div class="digit-circles" id="digitCircles"></div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">Total P/L</span>
-            <span class="stat-value" id="statPL">$0.00</span>
+
+          <div class="trade-panel">
+            <div class="stake-row">
+              <label>Base Stake (USD)</label>
+              <input type="number" id="stakeInput" value="0.35" min="0.35" step="0.01" />
+              <label style="margin-left: 1rem;">TP ($)</label>
+              <input type="number" id="tpInput" value="5.00" min="0.1" step="0.5" style="width: 80px;" />
+              <label style="margin-left: 1rem;">SL ($)</label>
+              <input type="number" id="slInput" value="5.00" min="0.1" step="0.5" style="width: 80px;" />
+            </div>
+            <div class="stake-row" style="margin-top: -0.5rem; margin-bottom: 1.5rem;">
+              <label>Martingale</label>
+              <select id="martingaleMult" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 0.5rem; border-radius: 8px;">
+                <option value="1">Off</option>
+                <option value="1.5">1.5x</option>
+                <option value="2" selected>2.0x</option>
+                <option value="3">3.0x</option>
+              </select>
+              <label style="margin-left: 1rem;">Max Steps</label>
+              <input type="number" id="maxStepsInput" value="3" min="1" max="10" style="width: 70px;" />
+            </div>
+
+            <p style="font-size: 0.75rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.5rem;">Manual Trade</p>
+            <div class="trade-buttons">
+              <button class="btn-trade over" data-type="over">OVER</button>
+              <button class="btn-trade under" data-type="under">UNDER</button>
+              <button class="btn-trade even" data-type="even">EVEN</button>
+              <button class="btn-trade odd" data-type="odd">ODD</button>
+            </div>
+
+            <div class="auto-trade-box">
+              <div class="auto-header">
+                <span>Auto-Trade Engine</span>
+                <select id="autoModeSelect" class="auto-mode-select">
+                  <option value="fixed">Fixed Signal</option>
+                  <option value="dynamic">Dynamic Cursor</option>
+                  <option value="risefall">Rise / Fall</option>
+                </select>
+              </div>
+              <div class="auto-controls">
+                <select id="autoSignalSelect">
+                  <option value="over">Auto OVER</option>
+                  <option value="under">Auto UNDER</option>
+                  <option value="even">Auto EVEN</option>
+                  <option value="odd">Auto ODD</option>
+                  <option value="rise">Auto RISE</option>
+                  <option value="fall">Auto FALL</option>
+                </select>
+                <button class="btn-auto-start" id="startAutoBtn">▶ Start Auto</button>
+                <button class="btn-auto-stop" id="stopAutoBtn" disabled>■ Stop</button>
+              </div>
+              <p class="trade-hint" id="tradeHint">Select a barrier and click a trade button to start.</p>
+            </div>
+          </div>
+
+          <div class="results-panel">
+            <div class="stats-bar">
+              <div class="stat-item"><span class="stat-label">Wins</span><span class="stat-value win" id="statWins">0</span></div>
+              <div class="stat-item"><span class="stat-label">Losses</span><span class="stat-value loss" id="statLosses">0</span></div>
+              <div class="stat-item"><span class="stat-label">Total P/L</span><span class="stat-value" id="statPL">$0.00</span></div>
+            </div>
+            <div class="results-header">
+              <h2>Trade History</h2>
+              <div style="display: flex; gap: 1rem; align-items: center;">
+                <span class="results-count" id="resultsCount">0</span>
+                <button class="btn-reset" id="resetHistoryBtn">Reset</button>
+              </div>
+            </div>
+            <div class="results-log" id="resultsLog">
+              <p class="empty-log">No trades yet. Place your first trade above.</p>
+            </div>
           </div>
         </div>
 
-        <div class="results-header">
-          <h2>Trade History</h2>
-          <div style="display: flex; gap: 1rem; align-items: center;">
-            <span class="results-count" id="resultsCount">0</span>
-            <button class="btn-reset" id="resetHistoryBtn">Reset</button>
+        <!-- RIGHT: SIGNAL SCANNER PANEL -->
+        <div class="signal-panel">
+          <div class="signal-header">
+            <h2>📡 Jump Scanner</h2>
+            <span class="signal-status" id="signalStatus">Scanning...</span>
+          </div>
+          <div class="signal-body">
+            <div class="signal-metric">
+              <span class="metric-label">Avg Jump Distance</span>
+              <span class="metric-value" id="jumpDistance">0.0</span>
+            </div>
+            <div class="signal-metric">
+              <span class="metric-label">Recent Digits</span>
+              <div class="recent-digits" id="recentDigits"></div>
+            </div>
+            <div class="signal-box" id="signalBox">
+              <div class="signal-icon" id="signalIcon">⏳</div>
+              <div class="signal-text" id="signalText">Waiting for ticks...</div>
+            </div>
+            <div class="signal-legend">
+              <span>🟢 Rise (Large Jumps)</span>
+              <span>🔴 Fall (Small Jumps)</span>
+            </div>
           </div>
         </div>
-        
-        <div class="results-log" id="resultsLog">
-          <p class="empty-log">No trades yet. Place your first trade above.</p>
-        </div>
+
       </div>
-
     </section>
-
   </main>
 
-  <footer class="footer">
-    <p>Auto Trader Pro · Trade at your own risk</p>
-  </footer>
-
-  <script src="script.js?v=4.0"></script>
+  <footer class="footer"><p>Auto Trader Pro · Trade at your own risk</p></footer>
+  <script src="script.js?v=17.0"></script>
 </body>
 </html>
