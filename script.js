@@ -1,8 +1,8 @@
 // ============================================
-//  AUTO TRADER PRO — v19.0 (Barrier Recovery)
-//  Added: Auto OVER w/ Recovery, Auto UNDER w/ Recovery
-//  Logic: On loss, shift barrier to safe zone (Over 4 / Under 5)
-//         On recovery win, return to original barrier
+//  AUTO TRADER PRO — v20.0 (Token Expiry Fix)
+//  Fixes: Silent stop after token expires (few days)
+//  On auth error: clears token, shows login screen
+//  On reconnect: fetches FRESH OTP every time
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -17,6 +17,7 @@ let ws = null;
 let reqId = 1;
 let pingInterval = null; 
 let reconnectAttempts = 0;
+let isReconnecting = false;
 
 const STATE = { IDLE: "IDLE", PRICING: "PRICING", BUYING: "BUYING", MONITORING: "MONITORING" };
 let currentState = STATE.IDLE;
@@ -31,10 +32,9 @@ let isAutoTrading = false;
 let currentMartingaleStep = 1;
 let baseStake = 0.35;
 
-// 🚨 RECOVERY STATE
 let isRecoveryMode = false;
 let originalBarrier = 5;
-let recoveryType = null; // "over" or "under"
+let recoveryType = null;
 
 let totalWins = 0, totalLosses = 0, totalPL = 0;
 
@@ -71,11 +71,9 @@ const stopAutoBtn = $("stopAutoBtn");
 const autoSignalSelect = $("autoSignalSelect");
 const autoModeSelect = $("autoModeSelect");
 
-// Recovery buttons
 const autoOverRecoveryBtn = $("autoOverRecoveryBtn");
 const autoUnderRecoveryBtn = $("autoUnderRecoveryBtn");
 
-// Signal panel
 const signalStatus = $("signalStatus");
 const jumpDistanceEl = $("jumpDistance");
 const recentDigitsEl = $("recentDigits");
@@ -142,6 +140,34 @@ function addResult(type, profit, entryPrice, exitPrice) {
   updateDashboardStats();
 }
 
+// ---- AUTH ERROR HANDLER (TOKEN EXPIRY FIX) ----
+function handleAuthError() {
+  console.warn("🚨 Token expired or invalid. Forcing re-login...");
+  tradeHint.textContent = "Session expired. Please log in again.";
+  
+  // Clear all auth state
+  sessionStorage.removeItem("deriv_access_token");
+  accessToken = null;
+  activeAccount = null;
+  
+  // Close WebSocket
+  if (pingInterval) clearInterval(pingInterval);
+  if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+  
+  // Stop the bot
+  isAutoTrading = false;
+  currentState = STATE.IDLE;
+  
+  // Show login screen
+  loginScreen.style.display = "flex";
+  tradingScreen.style.display = "none";
+  accountInfo.style.display = "none";
+  accountSwitcher.style.display = "none";
+  loginBtn.style.display = "block";
+  loginBtn.disabled = false;
+  loginBtn.textContent = "Login with Deriv";
+}
+
 // ---- OAUTH PKCE ----
 function generatePKCE() {
   const array = crypto.getRandomValues(new Uint8Array(64));
@@ -191,7 +217,10 @@ async function fetchAccounts() {
   try {
     const res = await fetch(`${API_BASE}/accounts`, { headers: { Authorization: `Bearer ${accessToken}` } });
     const data = await res.json();
-    if (!res.ok) return false;
+    if (!res.ok) {
+      if (res.status === 401) handleAuthError();
+      return false;
+    }
     const accounts = data.data || [];
     const demo = accounts.find((a) => (a.type || a.account_type) === "demo");
     const real = accounts.find((a) => (a.type || a.account_type) === "real");
@@ -203,6 +232,7 @@ async function fetchAccounts() {
     return true;
   } catch (err) { return false; }
 }
+
 async function selectAccount(acc) {
   if (currentState !== STATE.IDLE) return;
   activeAccount = { id: acc.account_id, type: acc.type || acc.account_type, currency: acc.currency || "USD" };
@@ -210,17 +240,40 @@ async function selectAccount(acc) {
   pillReal.classList.toggle("active", activeAccount.type === "real");
   accId.textContent = activeAccount.id;
   accountInfo.style.display = "flex";
-  if (ws) { clearInterval(pingInterval); ws.close(); }
+  if (ws) { clearInterval(pingInterval); ws.close(); ws = null; }
+  reconnectAttempts = 0;
   await connectWS();
 }
+
+// 🚨 FRESH OTP ON EVERY RECONNECT
 async function connectWS() {
+  if (!accessToken || !activeAccount) return;
+  
   try {
+    // Always request a FRESH OTP — this fixes the stale-URL issue
     const res = await fetch(`${API_BASE}/accounts/${activeAccount.id}/otp`, {
       method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     });
+    
+    if (res.status === 401) {
+      handleAuthError();
+      return;
+    }
+    
     const data = await res.json();
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.warn("OTP failed:", data.error?.message);
+      // Retry after delay
+      if (reconnectAttempts < 3) {
+        reconnectAttempts++;
+        tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
+        setTimeout(connectWS, 2000);
+      }
+      return;
+    }
+    
     ws = new WebSocket(data.data.url);
+    isReconnecting = false;
 
     ws.onopen = () => {
       reconnectAttempts = 0;
@@ -230,43 +283,107 @@ async function connectWS() {
       tradingScreen.style.display = "block";
       buildCircles();
       updateDashboardStats();
-      currentState = STATE.IDLE;
+      
+      // Don't reset state if we were mid-trade during a reconnect
+      if (currentState !== STATE.MONITORING) {
+        currentState = STATE.IDLE;
+      }
 
       clearInterval(pingInterval);
-      pingInterval = setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 })); }, 25000);
+      pingInterval = setInterval(() => { 
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ ping: 1 }));
+        }
+      }, 25000);
+      
+      tradeHint.textContent = "Connected. Ready.";
     };
 
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      
+      // 🚨 AUTH ERROR DETECTION — Token expired
       if (msg.error) {
-        console.warn("Deriv error:", msg.error.message);
+        const errorCode = msg.error.code || "";
+        console.warn("Deriv error:", errorCode, "-", msg.error.message);
+        
+        // Check for auth-related errors
+        if (errorCode === "InvalidToken" || 
+            errorCode === "AuthorizationRequired" || 
+            errorCode === "TokenExpired" ||
+            errorCode === "InvalidSession" ||
+            msg.error.message?.toLowerCase().includes("authoriz") ||
+            msg.error.message?.toLowerCase().includes("token")) {
+          handleAuthError();
+          return;
+        }
+        
+        // Other errors — unlock the bot
         if (msg.echo_req && (msg.echo_req.buy || msg.echo_req.proposal)) {
-          currentState = STATE.IDLE; enableTradeButtons(true); tradeHint.textContent = "Error: " + msg.error.message;
+          currentState = STATE.IDLE;
+          enableTradeButtons(true);
+          tradeHint.textContent = "Error: " + msg.error.message;
         }
         return;
       }
-      if (msg.msg_type === "balance") balanceEl.textContent = `$${parseFloat(msg.balance.balance).toFixed(2)}`;
+      
+      if (msg.msg_type === "balance" && msg.balance) {
+        balanceEl.textContent = `$${parseFloat(msg.balance.balance).toFixed(2)}`;
+      }
       if (msg.msg_type === "tick") handleTick(msg.tick);
       if (msg.msg_type === "proposal") handleProposal(msg.proposal);
       if (msg.msg_type === "buy") handleBuy(msg.buy);
       if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) handleContractUpdate(msg.proposal_open_contract);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       clearInterval(pingInterval);
+      ws = null;
+      
+      if (isReconnecting) return;
+      
       if (accessToken && activeAccount && reconnectAttempts < 3) {
-        reconnectAttempts++; tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
-        setTimeout(connectWS, 2000);
+        isReconnecting = true;
+        reconnectAttempts++;
+        tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
+        setTimeout(() => {
+          isReconnecting = false;
+          connectWS();
+        }, 2000);
       } else {
-        tradeHint.textContent = "Disconnected."; currentState = STATE.IDLE; enableTradeButtons(true);
+        tradeHint.textContent = "Disconnected. Please refresh or log in again.";
+        currentState = STATE.IDLE;
+        enableTradeButtons(true);
+        // If reconnect failed 3 times, force re-login
+        if (reconnectAttempts >= 3) {
+          handleAuthError();
+        }
       }
     };
-  } catch (err) { console.warn("Connection failed:", err); }
+    
+    ws.onerror = () => {
+      console.warn("WebSocket error");
+    };
+    
+  } catch (err) {
+    console.warn("Connection failed:", err);
+    if (reconnectAttempts < 3) {
+      reconnectAttempts++;
+      setTimeout(connectWS, 2000);
+    } else {
+      handleAuthError();
+    }
+  }
 }
+
 function subscribeTicks() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ forget_all: "ticks", req_id: reqId++ }));
-  setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ })); }, 100);
+  setTimeout(() => { 
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ ticks: currentMarket, subscribe: 1, req_id: reqId++ }));
+    }
+  }, 100);
 }
 
 // ---- TICK HANDLER & JUMP SCANNER ----
@@ -333,18 +450,11 @@ function requestTrade(signalType) {
   currentState = STATE.PRICING; enableTradeButtons(false);
   let contractType = null, barrier = null;
 
-  // 🚨 RECOVERY MODE LOGIC
   if (isRecoveryMode) {
-    if (recoveryType === "over") {
-      contractType = "DIGITOVER";
-      barrier = 4; // Safe barrier for OVER recovery
-    } else if (recoveryType === "under") {
-      contractType = "DIGITUNDER";
-      barrier = 5; // Safe barrier for UNDER recovery
-    }
+    if (recoveryType === "over") { contractType = "DIGITOVER"; barrier = 4; }
+    else if (recoveryType === "under") { contractType = "DIGITUNDER"; barrier = 5; }
     tradeHint.textContent = `🔄 Recovery: ${contractType} ${barrier} @ $${getStake()}`;
   }
-  // 🚨 NORMAL MODE LOGIC
   else if (autoModeSelect.value === "risefall" && isAutoTrading) {
     const userChoice = autoSignalSelect.value;
     if (userChoice === "rise") contractType = "PUT";
@@ -378,11 +488,13 @@ function handleProposal(proposal) {
   currentState = STATE.BUYING;
   ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, req_id: reqId++ }));
 }
+
 function handleBuy(buy) {
   if (currentState !== STATE.BUYING) return;
   currentContractId = buy.contract_id; currentState = STATE.MONITORING;
   ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: currentContractId, subscribe: 1, req_id: reqId++ }));
 }
+
 function handleContractUpdate(contract) {
   if (currentState !== STATE.MONITORING) return;
   if (contract.contract_id !== currentContractId) return;
@@ -398,44 +510,38 @@ function handleContractUpdate(contract) {
 
   currentState = STATE.IDLE; currentContractId = null;
 
-  // 🚨 RECOVERY LOGIC
   if (isRecoveryMode) {
     if (profit > 0) {
-      // Recovery successful: return to normal mode
       isRecoveryMode = false;
       recoveryType = null;
       selectedBarrier = originalBarrier;
       currentMartingaleStep = 1;
       tradeHint.textContent = `✅ Recovery successful. Back to barrier ${originalBarrier}.`;
     } else {
-      // Recovery failed: increase stake and retry recovery
       currentMartingaleStep++;
       tradeHint.textContent = `🔄 Recovery lost. Retrying...`;
     }
   } else {
-    // Normal mode
     if (profit > 0) {
       currentMartingaleStep = 1;
     } else {
-      // LOSS: Enter recovery mode
       isRecoveryMode = true;
       recoveryType = (autoSignalSelect.value === "over" || autoSignalSelect.value === "under") ? autoSignalSelect.value : "over";
       currentMartingaleStep++;
-      tradeHint.textContent = `🔄 Loss detected. Switching to recovery barrier (${recoveryType === "over" ? "Over 4" : "Under 5"})...`;
+      tradeHint.textContent = `🔄 Loss detected. Switching to recovery barrier...`;
     }
   }
 
-  // TP/SL Check
   const tp = parseFloat(tpInput.value); const sl = parseFloat(slInput.value);
   if (totalPL >= tp || totalPL <= -sl) {
-    stopAutoTrade(); tradeHint.textContent = totalPL >= tp ? "🎯 TP Hit!" : "🛑 SL Hit!";
+    stopAutoTrade(); 
+    tradeHint.textContent = totalPL >= tp ? "🎯 TP Hit!" : "🛑 SL Hit!";
     enableTradeButtons(true); return;
   }
 
-  // CONTINUE TRADING
   if (isAutoTrading) {
     if (isRecoveryMode) {
-      requestTrade(null); // Recovery trade
+      requestTrade(null);
     } else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
       requestTrade(autoSignalSelect.value);
     }
@@ -449,7 +555,6 @@ function handleContractUpdate(contract) {
 tradeBtns.forEach((btn) => { btn.addEventListener("click", () => { if (isAutoTrading) return; requestTrade(btn.dataset.type); }); });
 function enableTradeButtons(enabled) { tradeBtns.forEach((btn) => (btn.disabled = !enabled)); }
 
-// 🚨 RECOVERY BUTTON HANDLERS
 autoOverRecoveryBtn.addEventListener("click", () => {
   if (currentState !== STATE.IDLE) return;
   isAutoTrading = true;
@@ -501,6 +606,7 @@ startAutoBtn.addEventListener("click", () => {
     requestTrade(autoSignalSelect.value);
   }
 });
+
 function stopAutoTrade() {
   isAutoTrading = false; isRecoveryMode = false;
   startAutoBtn.disabled = false; stopAutoBtn.disabled = true;
@@ -509,21 +615,24 @@ function stopAutoTrade() {
   enableTradeButtons(true); tradeHint.textContent = "Auto Stopped.";
 }
 stopAutoBtn.addEventListener("click", stopAutoTrade);
+
 resetHistoryBtn.addEventListener("click", () => {
   resultsLog.innerHTML = '<p class="empty-log">No trades yet. Place your first trade above.</p>';
   resultCount = 0; totalWins = 0; totalLosses = 0; totalPL = 0;
   resultsCount.textContent = "0"; updateDashboardStats();
 });
+
 marketSelect.addEventListener("change", () => {
   if (currentState !== STATE.IDLE) return;
   currentMarket = marketSelect.value;
   recentDigits = [];
   subscribeTicks();
 });
+
 logoutBtn.addEventListener("click", () => {
   sessionStorage.removeItem("deriv_access_token");
   if (pingInterval) clearInterval(pingInterval);
-  if (ws) ws.close();
+  if (ws) { try { ws.close(); } catch(e) {} ws = null; }
   accessToken = null; activeAccount = null; isAutoTrading = false;
   loginScreen.style.display = "flex"; tradingScreen.style.display = "none";
   accountInfo.style.display = "none"; accountSwitcher.style.display = "none";
