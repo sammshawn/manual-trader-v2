@@ -1,8 +1,7 @@
 // ============================================
-//  AUTO TRADER PRO — v20.0 (Token Expiry Fix)
-//  Fixes: Silent stop after token expires (few days)
-//  On auth error: clears token, shows login screen
-//  On reconnect: fetches FRESH OTP every time
+//  AUTO TRADER PRO — v21.0 (Subscription Fix)
+//  Fixes: AlreadySubscribed error, market change hang
+//  On settle: forget_all proposal_open_contract (not just id)
 // ============================================
 
 const CLIENT_ID = "34XvCEo3LsxqfQz1GEpYN";
@@ -140,25 +139,22 @@ function addResult(type, profit, entryPrice, exitPrice) {
   updateDashboardStats();
 }
 
-// ---- AUTH ERROR HANDLER (TOKEN EXPIRY FIX) ----
+// ---- AUTH ERROR HANDLER ----
 function handleAuthError() {
-  console.warn("🚨 Token expired or invalid. Forcing re-login...");
+  console.warn("🚨 Token expired. Forcing re-login...");
   tradeHint.textContent = "Session expired. Please log in again.";
   
-  // Clear all auth state
   sessionStorage.removeItem("deriv_access_token");
   accessToken = null;
   activeAccount = null;
   
-  // Close WebSocket
   if (pingInterval) clearInterval(pingInterval);
   if (ws) { try { ws.close(); } catch(e) {} ws = null; }
   
-  // Stop the bot
   isAutoTrading = false;
   currentState = STATE.IDLE;
+  currentContractId = null;
   
-  // Show login screen
   loginScreen.style.display = "flex";
   tradingScreen.style.display = "none";
   accountInfo.style.display = "none";
@@ -234,7 +230,11 @@ async function fetchAccounts() {
 }
 
 async function selectAccount(acc) {
-  if (currentState !== STATE.IDLE) return;
+  if (currentState !== STATE.IDLE) {
+    // Force reset if stuck
+    currentState = STATE.IDLE;
+    currentContractId = null;
+  }
   activeAccount = { id: acc.account_id, type: acc.type || acc.account_type, currency: acc.currency || "USD" };
   pillDemo.classList.toggle("active", activeAccount.type === "demo");
   pillReal.classList.toggle("active", activeAccount.type === "real");
@@ -245,12 +245,11 @@ async function selectAccount(acc) {
   await connectWS();
 }
 
-// 🚨 FRESH OTP ON EVERY RECONNECT
+// 🚨 FRESH OTP ON EVERY RECONNECT + PROPER SUBSCRIPTION CLEANUP
 async function connectWS() {
   if (!accessToken || !activeAccount) return;
   
   try {
-    // Always request a FRESH OTP — this fixes the stale-URL issue
     const res = await fetch(`${API_BASE}/accounts/${activeAccount.id}/otp`, {
       method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     });
@@ -263,7 +262,6 @@ async function connectWS() {
     const data = await res.json();
     if (!res.ok) {
       console.warn("OTP failed:", data.error?.message);
-      // Retry after delay
       if (reconnectAttempts < 3) {
         reconnectAttempts++;
         tradeHint.textContent = `Reconnecting (${reconnectAttempts}/3)...`;
@@ -284,10 +282,9 @@ async function connectWS() {
       buildCircles();
       updateDashboardStats();
       
-      // Don't reset state if we were mid-trade during a reconnect
-      if (currentState !== STATE.MONITORING) {
-        currentState = STATE.IDLE;
-      }
+      // Reset state on fresh connection
+      currentState = STATE.IDLE;
+      currentContractId = null;
 
       clearInterval(pingInterval);
       pingInterval = setInterval(() => { 
@@ -302,23 +299,30 @@ async function connectWS() {
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       
-      // 🚨 AUTH ERROR DETECTION — Token expired
       if (msg.error) {
         const errorCode = msg.error.code || "";
         console.warn("Deriv error:", errorCode, "-", msg.error.message);
         
-        // Check for auth-related errors
-        if (errorCode === "InvalidToken" || 
-            errorCode === "AuthorizationRequired" || 
-            errorCode === "TokenExpired" ||
-            errorCode === "InvalidSession" ||
+        // Auth errors
+        if (errorCode === "InvalidToken" || errorCode === "AuthorizationRequired" || 
+            errorCode === "TokenExpired" || errorCode === "InvalidSession" ||
             msg.error.message?.toLowerCase().includes("authoriz") ||
             msg.error.message?.toLowerCase().includes("token")) {
           handleAuthError();
           return;
         }
         
-        // Other errors — unlock the bot
+        // 🚨 AlreadySubscribed — this was blocking new trades
+        if (errorCode === "AlreadySubscribed") {
+          console.warn("AlreadySubscribed — forcing forget_all");
+          ws.send(JSON.stringify({ forget_all: "proposal_open_contract", req_id: reqId++ }));
+          currentState = STATE.IDLE;
+          currentContractId = null;
+          enableTradeButtons(true);
+          return;
+        }
+        
+        // Other errors — unlock
         if (msg.echo_req && (msg.echo_req.buy || msg.echo_req.proposal)) {
           currentState = STATE.IDLE;
           enableTradeButtons(true);
@@ -336,7 +340,7 @@ async function connectWS() {
       if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) handleContractUpdate(msg.proposal_open_contract);
     };
 
-    ws.onclose = (e) => {
+    ws.onclose = () => {
       clearInterval(pingInterval);
       ws = null;
       
@@ -353,17 +357,13 @@ async function connectWS() {
       } else {
         tradeHint.textContent = "Disconnected. Please refresh or log in again.";
         currentState = STATE.IDLE;
+        currentContractId = null;
         enableTradeButtons(true);
-        // If reconnect failed 3 times, force re-login
-        if (reconnectAttempts >= 3) {
-          handleAuthError();
-        }
+        if (reconnectAttempts >= 3) handleAuthError();
       }
     };
     
-    ws.onerror = () => {
-      console.warn("WebSocket error");
-    };
+    ws.onerror = () => console.warn("WebSocket error");
     
   } catch (err) {
     console.warn("Connection failed:", err);
@@ -386,7 +386,7 @@ function subscribeTicks() {
   }, 100);
 }
 
-// ---- TICK HANDLER & JUMP SCANNER ----
+// ---- TICK HANDLER ----
 function handleTick(tick) {
   if (tick.symbol !== currentMarket) return;
   const decimals = DECIMALS_MAP[currentMarket] || 2;
@@ -402,8 +402,11 @@ function handleTick(tick) {
   if (recentDigits.length > 6) recentDigits.shift();
   updateSignalScanner();
 
+  // 🚨 FIX: Fire for ALL auto modes, not just risefall
   if (isAutoTrading && currentState === STATE.IDLE) {
     if (autoModeSelect.value === "risefall") {
+      requestTrade(autoSignalSelect.value);
+    } else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
       requestTrade(autoSignalSelect.value);
     }
   }
@@ -506,7 +509,9 @@ function handleContractUpdate(contract) {
   const exitSpot = contract.exit_spot ? parseFloat(contract.exit_spot).toFixed(decimals) : "—";
 
   addResult(profit > 0 ? "win" : "loss", profit, entrySpot, exitSpot);
-  ws.send(JSON.stringify({ forget: contract.id, req_id: reqId++ }));
+
+  // 🚨 FIX: Use forget_all instead of forget with contract.id
+  ws.send(JSON.stringify({ forget_all: "proposal_open_contract", req_id: reqId++ }));
 
   currentState = STATE.IDLE; currentContractId = null;
 
@@ -539,12 +544,14 @@ function handleContractUpdate(contract) {
     enableTradeButtons(true); return;
   }
 
+  // 🚨 FIX: Explicitly fire next trade for fixed/dynamic modes
   if (isAutoTrading) {
     if (isRecoveryMode) {
       requestTrade(null);
     } else if (autoModeSelect.value === "fixed" || autoModeSelect.value === "dynamic") {
       requestTrade(autoSignalSelect.value);
     }
+    // risefall will fire on next tick via handleTick
   } else {
     enableTradeButtons(true);
     tradeHint.textContent = `Last: ${profit > 0 ? "WIN" : "LOSS"} · Ready.`;
@@ -622,11 +629,24 @@ resetHistoryBtn.addEventListener("click", () => {
   resultsCount.textContent = "0"; updateDashboardStats();
 });
 
+// 🚨 FIX: Full state reset on market change
 marketSelect.addEventListener("change", () => {
-  if (currentState !== STATE.IDLE) return;
+  // Force reset even if mid-trade
+  currentState = STATE.IDLE;
+  currentContractId = null;
+  isRecoveryMode = false;
+  
   currentMarket = marketSelect.value;
   recentDigits = [];
+  lastDigit = null;
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ forget_all: "proposal_open_contract", req_id: reqId++ }));
+  }
+  
   subscribeTicks();
+  tradeHint.textContent = `Market changed to ${currentMarket}. Ready.`;
+  enableTradeButtons(true);
 });
 
 logoutBtn.addEventListener("click", () => {
@@ -634,6 +654,7 @@ logoutBtn.addEventListener("click", () => {
   if (pingInterval) clearInterval(pingInterval);
   if (ws) { try { ws.close(); } catch(e) {} ws = null; }
   accessToken = null; activeAccount = null; isAutoTrading = false;
+  currentState = STATE.IDLE; currentContractId = null;
   loginScreen.style.display = "flex"; tradingScreen.style.display = "none";
   accountInfo.style.display = "none"; accountSwitcher.style.display = "none";
   loginBtn.style.display = "block";
